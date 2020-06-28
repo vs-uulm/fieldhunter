@@ -1,0 +1,3 @@
+[submodule "sub/nemere"]
+	path = sub/nemere
+	url = git@gitlab-vs.informatik.uni-ulm.de:protocol-re/reup-nemesys.git

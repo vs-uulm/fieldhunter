@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/fieldhunter.iml" filepath="$PROJECT_DIR$/.idea/fieldhunter.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../nemesys/.idea/nemesys.iml" filepath="$PROJECT_DIR$/../nemesys/.idea/nemesys.iml" />
+    </modules>
+  </component>
+</project>
