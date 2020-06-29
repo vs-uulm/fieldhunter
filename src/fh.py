@@ -2,10 +2,11 @@ from argparse import ArgumentParser
 from os.path import isfile, basename, splitext
 
 from tabulate import tabulate
+from pprint import pprint
 import IPython
 
 from nemere.utils.loader import SpecimenLoader
-from fieldhunter.utils.base import NgramIterator
+from fieldhunter.utils.base import NgramIterator, splitDirections, entropyFilterVertical
 
 
 if __name__ == '__main__':
@@ -28,10 +29,19 @@ if __name__ == '__main__':
     specimens = SpecimenLoader(args.pcapfilename)
     messages = list(specimens.messagePool.keys())
 
-    m0n4 = NgramIterator(messages[0], 4)
-    m0n4list = list(m0n4)
+    c2s, s2c = splitDirections(messages)
 
-    print(tabulate(m0n4list))
+    pprint(c2s)
+    pprint(s2c)
+
+    c2sEntropy = entropyFilterVertical(c2s)
+    s2cEntropy = entropyFilterVertical(s2c)
+
+
+
+    # m0n4 = NgramIterator(messages[0], 4)
+    # m0n4list = list(m0n4)
+    # print(tabulate(m0n4list))
 
     IPython.embed()
 
