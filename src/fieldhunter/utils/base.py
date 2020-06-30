@@ -2,6 +2,8 @@ from collections import Iterator
 from itertools import chain
 from typing import List, Dict
 
+from pyitlib import discrete_random_variable as drv
+
 from netzob.Model.Vocabulary.Messages.AbstractMessage import AbstractMessage
 from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
 
@@ -32,6 +34,10 @@ class NgramIterator(Iterator):
     @property
     def offset(self):
         return self.__offset
+
+    @property
+    def exhausted(self):
+        return self.__offset > len(self._message.data) - self._n
 
 
 class Flows(object):
@@ -132,8 +138,6 @@ class Flows(object):
         return qr
 
 
-
-
 def entropyFilterVertical(messages: List[L4NetworkMessage], n=1):
     """
     Find offsets of n-grams (with the same offset in different messages of the list), that are not constant and not
@@ -151,6 +155,10 @@ def entropyFilterVertical(messages: List[L4NetworkMessage], n=1):
     return vEntropy
 
 
+def intsFromNgrams(ngrams: List[bytes], endianness='big'):
+    return [int.from_bytes(b, endianness) for b in ngrams]
+
+
 def pyitEntropyFilterVertical(messages: List[L4NetworkMessage], n=1, endianness='big'):
     """
     Find offsets of n-grams (with the same offset in different messages of the list), that are not constant and not
@@ -160,15 +168,42 @@ def pyitEntropyFilterVertical(messages: List[L4NetworkMessage], n=1, endianness=
 
     FH, Section 3.2.1
     """
-    from pyitlib import discrete_random_variable as drv
-
     ngIters = [NgramIterator(msg, n) for msg in messages]
     vEntropy = list()
 
     for ngrams in zip(*ngIters):
-        vEntropy.append(drv.entropy([
-            int.from_bytes(b, endianness) for b in ngrams
-        ]))
+        vEntropy.append(drv.entropy(intsFromNgrams(ngrams, endianness)))
 
     # TODO discard constant and random offsets (threshold?)
     return vEntropy
+
+
+def qrAssociation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1):
+    mutInf = dict()
+    qIterators, rIterators = list(), list()
+    for qrPair in mqr.items():
+        qIterators.append(NgramIterator(qrPair[0], n))
+        rIterators.append(NgramIterator(qrPair[1], n))
+    while not all(qiter.exhausted for qiter in qIterators) or all(riter.exhausted for riter in rIterators):
+        qNgrams = list()
+        rNgrams = list()
+        # get two lists of ngrams with the same offset, one for queries, one for responses
+        for qIter, rIter in zip(qIterators, rIterators):
+            try:
+                qNgram = next(qIter)
+                rNgram = next(rIter)
+            except StopIteration:
+                # there are no more ngrams for query or response for this pair of Q/R messages
+                continue
+            qNgrams.append(qNgram)
+            rNgrams.append(rNgram)
+            # print("Q offset:", qIter.offset)  # should be the same for all iterators in one while loop
+            # print("R offset:", rIter.offset, "\n")
+        if len(qNgrams) == 0 or len(rNgrams) == 0:
+            break
+        print(qNgrams)
+        print(rNgrams, "\n")
+        qInts = intsFromNgrams(qNgrams)
+        rInts = intsFromNgrams(rNgrams)
+        mutInf[qIter.offset] = drv.information_mutual(qInts, rInts) / drv.entropy(qInts)
+    return mutInf

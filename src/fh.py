@@ -6,7 +6,7 @@ from pprint import pprint
 import IPython
 
 from nemere.utils.loader import SpecimenLoader
-from fieldhunter.utils.base import Flows, pyitEntropyFilterVertical
+from fieldhunter.utils.base import Flows, pyitEntropyFilterVertical, qrAssociation
 
 
 if __name__ == '__main__':
@@ -44,10 +44,11 @@ if __name__ == '__main__':
 
     mqr = flows.matchQueryRespone()
 
-    # computer Q->R association/
+    # compute Q->R association/
     # Mutual information
-    from pyitlib import discrete_random_variable as drv
-    drv.information_mutual(ngramsfromQ, ngramsfromR)
+    qrA = qrAssociation(mqr)
+
+
 
 
 
