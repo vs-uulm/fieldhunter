@@ -42,10 +42,12 @@ if __name__ == '__main__':
     s2cEntropy = pyitEntropyFilterVertical(s2c)
     # print(tabulate(zip(c2sEntropy, s2cEntropy), headers=["c2s", "s2c"], showindex=True))
 
+    mqr = flows.matchQueryRespone()
 
-
-
+    # computer Q->R association/
     # Mutual information
+    from pyitlib import discrete_random_variable as drv
+    drv.information_mutual(ngramsfromQ, ngramsfromR)
 
 
 

@@ -74,7 +74,7 @@ class Flows(object):
                 if dialogs[rkeytuple] is not None:
                     raise Exception("Strange things happened here.")
                 # identify the flow starting earlier as client (key in dialogs), the other as server (value in dialogs)
-                if self._flows[rkeytuple][0].date > self._flows[keytuple][0].date:
+                if self._flows[rkeytuple][0].date < self._flows[keytuple][0].date:
                     dialogs[rkeytuple] = keytuple
                 else:
                     del dialogs[rkeytuple]
@@ -94,8 +94,44 @@ class Flows(object):
         # merge all client flows into one and all server flows into another list of messages
         c2s = list(chain.from_iterable(self._flows[keytuple] for keytuple in dialogs.keys() if dialogs[keytuple] is not None))
         s2c = list(chain.from_iterable(self._flows[keytuple] for keytuple in dialogs.values() if keytuple is not None))
-
         return c2s, s2c
+
+    def matchQueryRespone(self):
+        """
+
+        mqr = flows.matchQueryRespone()
+        print(tabulate([(q.date, r.date) for q, r in mqr.items()]))
+
+        """
+        dialogs = self.dialogs()
+        qr = dict()
+
+        for keytuple in dialogs.keys():
+            if dialogs[keytuple] is None:
+                continue
+            qlist = self._flows[keytuple].copy()
+            rlist = self._flows[dialogs[keytuple]].copy()
+
+            # assume qlist and rlist are sorted by query.date and resp.date
+            prevquery = None
+            for query in qlist:
+                respFound = False
+                for resp in rlist:
+                    # first response later than query
+                    if query.date < resp.date:
+                        qr[query] = resp
+                        respFound = True
+                        break
+                if not respFound:
+                    continue
+                # if the response to query seems to be the same than to the previous query...
+                if prevquery is not None and qr[query] == qr[prevquery]:
+                    # ... ignore the earlier query since a response message in between seems to have gone missing.
+                    del qr[prevquery]
+                prevquery = query
+        return qr
+
+
 
 
 def entropyFilterVertical(messages: List[L4NetworkMessage], n=1):
@@ -111,7 +147,7 @@ def entropyFilterVertical(messages: List[L4NetworkMessage], n=1):
     for ngrams in zip(*ngIters):
         vEntropy.append(MessageAnalyzer.calcEntropy(ngrams, 256) * 8)
 
-    # discard constant and random offsets (threshold?)
+    # TODO discard constant and random offsets (threshold?)
     return vEntropy
 
 
@@ -134,5 +170,5 @@ def pyitEntropyFilterVertical(messages: List[L4NetworkMessage], n=1, endianness=
             int.from_bytes(b, endianness) for b in ngrams
         ]))
 
-    # discard constant and random offsets (threshold?)
+    # TODO discard constant and random offsets (threshold?)
     return vEntropy
