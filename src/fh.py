@@ -6,7 +6,7 @@ from pprint import pprint
 import IPython
 
 from nemere.utils.loader import SpecimenLoader
-from fieldhunter.utils.base import NgramIterator, splitDirections, entropyFilterVertical
+from fieldhunter.utils.base import Flows, pyitEntropyFilterVertical
 
 
 if __name__ == '__main__':
@@ -28,20 +28,30 @@ if __name__ == '__main__':
 
     specimens = SpecimenLoader(args.pcapfilename)
     messages = list(specimens.messagePool.keys())
+    flows = Flows(messages)
 
-    c2s, s2c = splitDirections(messages)
+    c2s, s2c = flows.splitDirections()
+    # pprint(c2s)
+    # pprint(s2c)
 
-    pprint(c2s)
-    pprint(s2c)
+    # c2sEntropy = entropyFilterVertical(c2s)
+    # s2cEntropy = entropyFilterVertical(s2c)
+    # print(tabulate(zip(c2sEntropy, s2cEntropy), headers=["c2s", "s2c"], showindex=True))
 
-    c2sEntropy = entropyFilterVertical(c2s)
-    s2cEntropy = entropyFilterVertical(s2c)
+    c2sEntropy = pyitEntropyFilterVertical(c2s)
+    s2cEntropy = pyitEntropyFilterVertical(s2c)
+    # print(tabulate(zip(c2sEntropy, s2cEntropy), headers=["c2s", "s2c"], showindex=True))
 
 
 
-    # m0n4 = NgramIterator(messages[0], 4)
-    # m0n4list = list(m0n4)
-    # print(tabulate(m0n4list))
+
+    # Mutual information
+
+
+
+
+    # Merge n-grams above causality threshold 0.8 and check correlation
+
 
     IPython.embed()
 
