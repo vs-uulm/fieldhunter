@@ -138,7 +138,7 @@ class Flows(object):
         return qr
 
 
-def entropyFilterVertical(messages: List[L4NetworkMessage], n=1):
+def entropyVertical(messages: List[L4NetworkMessage], n=1):
     """
     Find offsets of n-grams (with the same offset in different messages of the list), that are not constant and not
     random, i. e., that have a entropy > 0 and < x (threshold?)
@@ -149,9 +149,8 @@ def entropyFilterVertical(messages: List[L4NetworkMessage], n=1):
     vEntropy = list()
 
     for ngrams in zip(*ngIters):
-        vEntropy.append(MessageAnalyzer.calcEntropy(ngrams, 256) * 8)
+        vEntropy.append(MessageAnalyzer.calcEntropy(ngrams, 256))
 
-    # TODO discard constant and random offsets (threshold?)
     return vEntropy
 
 
@@ -159,12 +158,12 @@ def intsFromNgrams(ngrams: List[bytes], endianness='big'):
     return [int.from_bytes(b, endianness) for b in ngrams]
 
 
-def pyitEntropyFilterVertical(messages: List[L4NetworkMessage], n=1, endianness='big'):
+def pyitEntropyVertical(messages: List[L4NetworkMessage], n=1, endianness='big'):
     """
     Find offsets of n-grams (with the same offset in different messages of the list), that are not constant and not
     random, i. e., that have a entropy > 0 and < x (threshold?)
 
-    >>> entropyFilterVertical(messages) == pyitEntropyFilterVertical(messages)
+    >>> entropyVertical(messages) == pyitEntropyVertical(messages)
 
     FH, Section 3.2.1
     """
@@ -172,9 +171,8 @@ def pyitEntropyFilterVertical(messages: List[L4NetworkMessage], n=1, endianness=
     vEntropy = list()
 
     for ngrams in zip(*ngIters):
-        vEntropy.append(drv.entropy(intsFromNgrams(ngrams, endianness)))
+        vEntropy.append(drv.entropy(intsFromNgrams(ngrams, endianness))/(n*8))
 
-    # TODO discard constant and random offsets (threshold?)
     return vEntropy
 
 
@@ -201,8 +199,8 @@ def qrAssociation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1):
             # print("R offset:", rIter.offset, "\n")
         if len(qNgrams) == 0 or len(rNgrams) == 0:
             break
-        print(qNgrams)
-        print(rNgrams, "\n")
+        # print(qNgrams)
+        # print(rNgrams, "\n")
         qInts = intsFromNgrams(qNgrams)
         rInts = intsFromNgrams(rNgrams)
         mutInf[qIter.offset] = drv.information_mutual(qInts, rInts) / drv.entropy(qInts)

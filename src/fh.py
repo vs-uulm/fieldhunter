@@ -6,7 +6,7 @@ from pprint import pprint
 import IPython
 
 from nemere.utils.loader import SpecimenLoader
-from fieldhunter.utils.base import Flows, pyitEntropyFilterVertical, qrAssociation
+from fieldhunter.utils.base import Flows, pyitEntropyVertical, qrAssociation
 
 
 if __name__ == '__main__':
@@ -34,19 +34,26 @@ if __name__ == '__main__':
     # pprint(c2s)
     # pprint(s2c)
 
-    # c2sEntropy = entropyFilterVertical(c2s)
-    # s2cEntropy = entropyFilterVertical(s2c)
+    # c2sEntropy = entropyVertical(c2s)
+    # s2cEntropy = entropyVertical(s2c)
     # print(tabulate(zip(c2sEntropy, s2cEntropy), headers=["c2s", "s2c"], showindex=True))
 
-    c2sEntropy = pyitEntropyFilterVertical(c2s)
-    s2cEntropy = pyitEntropyFilterVertical(s2c)
+    # discard constant and random offsets (threshold?)
+    entropyThresh = 0.2
+    c2sEntropy = pyitEntropyVertical(c2s)
+    c2sEntropyFiltered = [offset for offset, entropy in enumerate(c2sEntropy) if 0 < entropy < entropyThresh]
+    s2cEntropy = pyitEntropyVertical(s2c)
+    s2cEntropyFiltered = [offset for offset, entropy in enumerate(s2cEntropy) if 0 < entropy < entropyThresh]
     # print(tabulate(zip(c2sEntropy, s2cEntropy), headers=["c2s", "s2c"], showindex=True))
+    print(c2sEntropyFiltered)
+    print(s2cEntropyFiltered)
 
     mqr = flows.matchQueryRespone()
 
     # compute Q->R association/
     # Mutual information
     qrA = qrAssociation(mqr)
+    # consider only if c2sEntropyFiltered/s2cEntropyFiltered holds
 
 
 
