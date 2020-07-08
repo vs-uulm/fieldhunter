@@ -1,7 +1,8 @@
 from collections import Iterator
 from itertools import chain
-from typing import List, Dict
+from typing import List, Dict, Iterable, Tuple
 
+from numpy import nan
 from pyitlib import discrete_random_variable as drv
 
 from netzob.Model.Vocabulary.Messages.AbstractMessage import AbstractMessage
@@ -171,12 +172,39 @@ def pyitEntropyVertical(messages: List[L4NetworkMessage], n=1, endianness='big')
     vEntropy = list()
 
     for ngrams in zip(*ngIters):
+        # int.from_bytes is necessary because of numpy's issue with null-bytes: #3878
+        #   (https://github.com/numpy/numpy/issues/3878)
         vEntropy.append(drv.entropy(intsFromNgrams(ngrams, endianness))/(n*8))
 
     return vEntropy
 
 
-def qrAssociation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1):
+def mutualInformation(qInts: List[List[int]], rInts: List[List[int]]):
+    """
+
+    :param qInts: List of n-grams as int-list
+    :param rInts: List of n-grams as int-list
+    :return:
+    """
+    qEntropy = drv.entropy(qInts)
+    if qEntropy != 0:
+        return drv.information_mutual(qInts, rInts) / qEntropy
+    else:
+        return nan
+
+
+def qrAssociationCorrelation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1):
+    """
+    Take the matched query-response pairs (mqr) and associate ngram offsets by mutual information as correlation
+    metric.
+
+    # TODO optimize efficiency by supporting a input filter, i. e.,
+        calculate mutual information only for given ngram offsets
+
+    :param mqr: Matched query-response pairs
+    :param n: The length of the n-grams to use (in bytes)
+    :returns: Offset => causality value
+    """
     mutInf = dict()
     qIterators, rIterators = list(), list()
     for qrPair in mqr.items():
@@ -203,5 +231,57 @@ def qrAssociation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1):
         # print(rNgrams, "\n")
         qInts = intsFromNgrams(qNgrams)
         rInts = intsFromNgrams(rNgrams)
-        mutInf[qIter.offset] = drv.information_mutual(qInts, rInts) / drv.entropy(qInts)
+        mutInf[qIter.offset] = mutualInformation(qInts, rInts)
     return mutInf
+
+
+def verticalByteMerge(mqr: Dict[L4NetworkMessage, L4NetworkMessage], offsets: Iterable[int]):
+    """
+    Returns two lists of integer-list representations of byte strings, one from all queries and one from all responses,
+    containing the bytes at all offsets given as parameter.
+
+    :param mqr:
+    :param offsets:
+    :return:
+    """
+    from itertools import compress
+
+    sortedOffs = sorted(offsets)
+    qMerge = list()
+    rMerge = list()
+    for query, resp in mqr.items():
+        # int.from_bytes is necessary because of numpy's issue with null-bytes: #3878
+        #   (https://github.com/numpy/numpy/issues/3878)
+        qMerge.append(int.from_bytes(bytes(query.data[o] for o in sortedOffs), 'big'))
+        rMerge.append(int.from_bytes(bytes(resp.data[o] for o in sortedOffs), 'big'))
+
+    return qMerge, rMerge
+
+
+def list2ranges(offsets: List[int]):
+    """
+    Generate ranges from a list of integer values. The ranges denote the starts end ends of any subsequence of
+    adjacent values, e. g. the list [1,2,3,6,7,20] would result in the ranges [(1,3),(6,7),(20,20)]
+
+    :param offsets:
+    :return:
+    """
+    soffs = sorted(offsets)
+    ranges = list()  # type: List[Tuple[int,int]]
+    if len(soffs) == 0:
+        return ranges
+    else:
+        assert soffs[0] >= 0, "Offsets must be positive numbers."
+    if len(soffs) <= 1:
+        return [(soffs[0],soffs[0])]
+    start = soffs[0]
+    last = soffs[0]
+    for offs in soffs[1:]:
+        if offs > last + 1:
+            ranges.append((start,last))
+            # start a new range
+            start = offs
+        last = offs
+    ranges.append((start, last))
+
+    return ranges

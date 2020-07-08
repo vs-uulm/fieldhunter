@@ -6,8 +6,10 @@ from pprint import pprint
 import IPython
 
 from nemere.utils.loader import SpecimenLoader
-from fieldhunter.utils.base import Flows, pyitEntropyVertical, qrAssociation
-
+from nemere.inference.segments import TypedSegment
+from nemere.inference.analyzers import Value
+from fieldhunter.utils.base import Flows, pyitEntropyVertical, qrAssociationCorrelation, verticalByteMerge, \
+    mutualInformation, list2ranges
 
 if __name__ == '__main__':
     parser = ArgumentParser(
@@ -39,29 +41,61 @@ if __name__ == '__main__':
     # print(tabulate(zip(c2sEntropy, s2cEntropy), headers=["c2s", "s2c"], showindex=True))
 
     # discard constant and random offsets (threshold?)
-    entropyThresh = 0.2
+    entropyThresh = 0.4  # Not given in FH!
     c2sEntropy = pyitEntropyVertical(c2s)
     c2sEntropyFiltered = [offset for offset, entropy in enumerate(c2sEntropy) if 0 < entropy < entropyThresh]
     s2cEntropy = pyitEntropyVertical(s2c)
     s2cEntropyFiltered = [offset for offset, entropy in enumerate(s2cEntropy) if 0 < entropy < entropyThresh]
     # print(tabulate(zip(c2sEntropy, s2cEntropy), headers=["c2s", "s2c"], showindex=True))
-    print(c2sEntropyFiltered)
-    print(s2cEntropyFiltered)
+    # print(c2sEntropyFiltered)
+    # print(s2cEntropyFiltered)
 
-    mqr = flows.matchQueryRespone()
+    from collections import Counter
+    # print(tabulate(Counter(msg.data[2:4].hex() for msg in c2s).most_common()))
+    # print(tabulate(Counter(msg.data[2:4].hex() for msg in s2c).most_common()))
+
+
 
     # compute Q->R association/
+    mqr = flows.matchQueryRespone()
     # Mutual information
-    qrA = qrAssociation(mqr)
-    # consider only if c2sEntropyFiltered/s2cEntropyFiltered holds
+    qrCausality = qrAssociationCorrelation(mqr)
+    # filter: only if offset is in c2sEntropyFiltered/s2cEntropyFiltered and the causality is greater than the causalityThresh
+    causalityThresh = 0.6  # FH, Sec. 3.2.1 says 0.8
+    filteredCausality = {offset: qrCausality[offset] for offset in
+                         set(c2sEntropyFiltered).intersection(s2cEntropyFiltered)
+                         if qrCausality[offset] > causalityThresh}
+    # filteredCausality are offsets of MSG-Type candidate n-grams
+    print(tabulate(sorted(filteredCausality.items())))
 
 
+    # Merge n-grams above causality threshold and check correlation
+    mergingOffsets = list()
+    for offset in sorted(filteredCausality.keys()):
+        mergingOffsets.append(offset)
+        qMergedField, rMergedField = verticalByteMerge(mqr, mergingOffsets)
+        mergedCausality = mutualInformation(qMergedField, rMergedField)
+        if mergedCausality <= causalityThresh:
+            # Filter problematic n-grams
+            mergingOffsets.pop()
+    # re-calculate in case the last iteration removed a problematic n-gram
+    qMergedField, rMergedField = verticalByteMerge(mqr, mergingOffsets)
+    mergedCausality = mutualInformation(qMergedField, rMergedField)
+
+    print("mergedCausality", mergedCausality)
+    print("mergingOffsets", mergingOffsets)
+    print("  from offsets", sorted(filteredCausality.keys()))
+
+    # create segments from bytes in mergingOffsets and compare to dissector/field type
+    msgtypeRanges = list2ranges(mergingOffsets)
+    msgtypeSegments = list()
+    for message in c2s + s2c:
+        segs4msg = list()
+        for start,end in msgtypeRanges:
+            segs4msg.append(TypedSegment(Value(message), start, end+1-start, "MSG-Type"))
+        msgtypeSegments.append(segs4msg)
 
 
-
-
-    # Merge n-grams above causality threshold 0.8 and check correlation
-
-
+    # interactive
     IPython.embed()
 
