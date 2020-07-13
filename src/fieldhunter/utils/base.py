@@ -10,6 +10,11 @@ from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
 
 from nemere.inference.segments import MessageAnalyzer
 
+
+# constants
+entropyThresh = 0.4  # Not given in FH!
+
+
 class NgramIterator(Iterator):
     """
     Iterate over the byte n-grams in message.
@@ -139,10 +144,10 @@ class Flows(object):
         return qr
 
 
-def entropyVertical(messages: List[L4NetworkMessage], n=1):
+def entropyVertical(messages: List[AbstractMessage], n=1):
     """
-    Find offsets of n-grams (with the same offset in different messages of the list), that are not constant and not
-    random, i. e., that have a entropy > 0 and < x (threshold?)
+    The vertical entropies for each offset of all the n-grams at the same offset throughout all messages.
+    Own entropy calculation implementation. See #pyitEntropyVertical
 
     FH, Section 3.2.1
     """
@@ -155,14 +160,14 @@ def entropyVertical(messages: List[L4NetworkMessage], n=1):
     return vEntropy
 
 
-def intsFromNgrams(ngrams: List[bytes], endianness='big'):
+def intsFromNgrams(ngrams: Iterable[bytes], endianness='big'):
     return [int.from_bytes(b, endianness) for b in ngrams]
 
 
-def pyitEntropyVertical(messages: List[L4NetworkMessage], n=1, endianness='big'):
+def pyitEntropyVertical(messages: List[AbstractMessage], n=1, endianness='big'):
     """
-    Find offsets of n-grams (with the same offset in different messages of the list), that are not constant and not
-    random, i. e., that have a entropy > 0 and < x (threshold?)
+    The vertical entropies for each offset of all the n-grams at the same offset throughout all messages
+    Implementation of entropy calculation from pyitlib. See #entropyVertical
 
     >>> entropyVertical(messages) == pyitEntropyVertical(messages)
 
@@ -171,12 +176,27 @@ def pyitEntropyVertical(messages: List[L4NetworkMessage], n=1, endianness='big')
     ngIters = [NgramIterator(msg, n) for msg in messages]
     vEntropy = list()
 
-    for ngrams in zip(*ngIters):
+    for ngrams in zip(*ngIters):  # type: List[bytes]
         # int.from_bytes is necessary because of numpy's issue with null-bytes: #3878
         #   (https://github.com/numpy/numpy/issues/3878)
         vEntropy.append(drv.entropy(intsFromNgrams(ngrams, endianness))/(n*8))
 
     return vEntropy
+
+
+def entropyFilteredOffsets(messages: List[AbstractMessage], n: int):
+    """
+    Find offsets of n-grams (with the same offset in different messages of the list), that are not constant and not
+    random, i. e., that have a entropy > 0 and < x (threshold)
+
+    FH, Section 3.2.1
+
+    :param messages: Messages to generate n-grams from
+    :param n: The $n$ in n-gram
+    :return: Returns a list of offsets that have non-constant and non-random (below entropyThresh) entropy.
+    """
+    entropy = pyitEntropyVertical(messages, n)
+    return [offset for offset, entropy in enumerate(entropy) if 0 < entropy < entropyThresh]
 
 
 def mutualInformation(qInts: List[List[int]], rInts: List[List[int]]):
@@ -258,6 +278,10 @@ def verticalByteMerge(mqr: Dict[L4NetworkMessage, L4NetworkMessage], offsets: It
     return qMerge, rMerge
 
 
+def iterateSelected(toIter: Iterator, selectors: List[int]):
+    return (element for offset, element in enumerate(toIter) if offset in selectors)
+
+
 def list2ranges(offsets: List[int]):
     """
     Generate ranges from a list of integer values. The ranges denote the starts end ends of any subsequence of
@@ -285,3 +309,25 @@ def list2ranges(offsets: List[int]):
     ranges.append((start, last))
 
     return ranges
+
+
+def ngramIsOverlapping(o0, n0, o1, n1):
+    """
+
+    >>> ngramIsOverlapping(2,2,0,3)
+    True
+    >>> ngramIsOverlapping(2,2,0,2)
+    False
+    >>> ngramIsOverlapping(2,2,3,2)
+    True
+    >>> ngramIsOverlapping(2,2,4,2)
+    False
+
+    :param o0: Offset of n-gram 0
+    :param n0: Length (n) of n-gram 0
+    :param o1: Offset of n-gram 1
+    :param n1: Length (n) of n-gram 1
+    :return: True if overlapping, false otherwise
+    """
+    return o1 + n1 - 1 >= o0 and o1 < o0 + n0
+

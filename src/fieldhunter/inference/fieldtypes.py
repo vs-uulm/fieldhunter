@@ -6,10 +6,11 @@ from typing import List, Tuple, Dict
 
 from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
 
-from fieldhunter.utils.base import pyitEntropyVertical, qrAssociationCorrelation, verticalByteMerge, mutualInformation, \
-    list2ranges, Flows
+from fieldhunter.utils.base import qrAssociationCorrelation, verticalByteMerge, mutualInformation, \
+    list2ranges, Flows, entropyFilteredOffsets
 from nemere.inference.analyzers import Value
 from nemere.inference.segments import TypedSegment
+
 
 
 class MSGtype(object):
@@ -19,7 +20,7 @@ class MSGtype(object):
     Properties enable access to intermediate and final results.
     """
 
-    entropyThresh = 0.4    # Not given in FH!
+    typelabel = "MSG-Type"
     causalityThresh = 0.6  # FH, Sec. 3.2.1 says 0.8, but that leaves no candidates for our traces
 
     def __init__(self, flows: Flows):
@@ -32,14 +33,9 @@ class MSGtype(object):
         # s2cEntropy = entropyVertical(s2c)
         # print(tabulate(zip(c2sEntropy, s2cEntropy), headers=["c2s", "s2c"], showindex=True))
 
-        # discard constant and random offsets (threshold?)
-        self._c2sEntropy = pyitEntropyVertical(c2s)
-        self._c2sEntropyFiltered = [offset for offset, entropy
-                                    in enumerate(self._c2sEntropy) if 0 < entropy < MSGtype.entropyThresh]
-        self._s2cEntropy = pyitEntropyVertical(s2c)
-        self._s2cEntropyFiltered = [offset for offset, entropy
-                                    in enumerate(self._s2cEntropy) if 0 < entropy < MSGtype.entropyThresh]
-        # print(tabulate(zip(c2sEntropy, s2cEntropy), headers=["c2s", "s2c"], showindex=True))
+        # discard constant and random offsets
+        self._c2sEntropyFiltered = entropyFilteredOffsets(c2s, 1)
+        self._s2cEntropyFiltered = entropyFilteredOffsets(s2c, 1)
         # print(c2sEntropyFiltered)
         # print(s2cEntropyFiltered)
 
@@ -81,16 +77,9 @@ class MSGtype(object):
         for message in c2s + s2c:
             segs4msg = list()
             for start, end in self._msgtypeRanges:
-                segs4msg.append(TypedSegment(Value(message), start, end + 1 - start, "MSG-Type"))
+                segs4msg.append(TypedSegment(Value(message), start, end + 1 - start, self.typelabel))
             self._msgtypeSegments.append(segs4msg)
 
-
-    @property
-    def c2sEntropy(self) -> List[float]:
-        """
-        :return: The vertical entropies for each offset of all the client to server messages
-        """
-        return self._s2cEntropy
 
     @property
     def s2cEntropyFiltered(self) -> List[int]:
@@ -99,13 +88,6 @@ class MSGtype(object):
             greater than zero and less than MSGtype.entropyThresh
         """
         return self._s2cEntropyFiltered
-
-    @property
-    def s2cEntropy(self) -> List[float]:
-        """
-        :return: The vertical entropies for each offset of all the server to client messages
-        """
-        return self._c2sEntropy
 
     @property
     def c2sEntropyFiltered(self) -> List[int]:
