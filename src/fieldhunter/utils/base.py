@@ -199,7 +199,7 @@ def entropyFilteredOffsets(messages: List[AbstractMessage], n: int):
     return [offset for offset, entropy in enumerate(entropy) if 0 < entropy < entropyThresh]
 
 
-def mutualInformation(qInts: List[List[int]], rInts: List[List[int]]):
+def mutualInformationNormalized(qInts: List[List[int]], rInts: List[List[int]]):
     """
 
     :param qInts: List of n-grams as int-list
@@ -251,7 +251,7 @@ def qrAssociationCorrelation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1)
         # print(rNgrams, "\n")
         qInts = intsFromNgrams(qNgrams)
         rInts = intsFromNgrams(rNgrams)
-        mutInf[qIter.offset] = mutualInformation(qInts, rInts)
+        mutInf[qIter.offset] = mutualInformationNormalized(qInts, rInts)
     return mutInf
 
 
