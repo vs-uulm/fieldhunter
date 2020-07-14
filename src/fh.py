@@ -82,22 +82,43 @@ if __name__ == '__main__':
         ngramsSrcs.append(ngSc)
         categoricalCorrelation.append(catCorr)
 
-    print(tabulate(zip(*[categoricalCorrelation]), showindex="always"))
-    # TODO According to NTP offset 12 (REF ID, often the IP address itself) and DHCP offsets 12, 17, and 20 (IPs)
-    #  this works in principle, but the last two bytes somehow have a too low correlation. Investigate.
-    from matplotlib import pyplot
-    pyplot.bar(range(len(categoricalCorrelation)), categoricalCorrelation)
-    pyplot.show()
-
     # merge consecutive candidate n-grams with categoricalCorrelation > hostCorrelationThresh
+
 
     # discard short fields < minHostLenThresh
 
-
-
-
-
-
+    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+    # # # Investigate low categoricalCorrelation for all but one byte within an address field (see NTP and DHCP).
+    # # # According to NTP offset 12 (REF ID, often DST IP address) and DHCP offsets (12, 17, and) 20 (IPs)
+    # # # this works in principle, but if the n-gram is too short the correlation gets lost some n-grams.
+    # print(tabulate(zip(*[categoricalCorrelation]), showindex="always"))
+    # from matplotlib import pyplot
+    # pyplot.bar(range(len(categoricalCorrelation)), categoricalCorrelation)
+    # pyplot.show()
+    # # sum([msg.data[20:24] == bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
+    # # sum([int.from_bytes(messages[m].data[20:24], "big") == srcs[m] for m in range(len(messages))])
+    # # # While the whole bootp.ip.server [20:24] correlates nicely to the IP address, single n-grams don't.
+    # serverIP = [(int.from_bytes(messages[m].data[20:24], "big"), srcs[m]) for m in range(len(messages))]
+    # serverIP0 = [(messages[m].data[20], srcs[m]) for m in range(len(messages))]
+    # serverIP1 = [(messages[m].data[21], srcs[m]) for m in range(len(messages))]
+    # serverIP2 = [(messages[m].data[22], srcs[m]) for m in range(len(messages))]
+    # serverIP3 = [(messages[m].data[23], srcs[m]) for m in range(len(messages))]
+    # # nsp = numpy.array([sip for sip in serverIP])
+    # # # The correlation is perfect, if null values are omitted
+    # nsp = numpy.array([sip for sip in serverIP if sip[0] != 0])   #  and sip[0] == sip[1]
+    # # nsp0 = numpy.array(serverIP0)
+    # # nsp1 = numpy.array(serverIP1)
+    # # nsp2 = numpy.array(serverIP2)
+    # # nsp3 = numpy.array(serverIP3)
+    # nsp0 = numpy.array([sip for sip in serverIP0 if sip[0] != 0])
+    # nsp1 = numpy.array([sip for sip in serverIP1 if sip[0] != 0])
+    # nsp2 = numpy.array([sip for sip in serverIP2 if sip[0] != 0])
+    # nsp3 = numpy.array([sip for sip in serverIP3 if sip[0] != 0])
+    # for serverSrcPairs in [nsp, nsp0, nsp1, nsp2, nsp3]:
+    #     print(drv.information_mutual(serverSrcPairs[:, 0], serverSrcPairs[:, 1]) / drv.entropy_joint(serverSrcPairs.T))
+    # # # This is no implementation error, but raises doubts about the Host-ID description completeness:
+    # # # Probably it does not mention a Entropy filter, direction separation, or - most probably - an iterative n-gram size
+    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 
 
