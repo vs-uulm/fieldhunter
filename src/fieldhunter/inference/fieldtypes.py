@@ -232,7 +232,7 @@ class MSGlen(FieldType):
         def findCandidates(self):
             lens4msgmix = [len(m.data) for m in self._msgmixlen]  # type: List[int]
             candidateAtNgram = dict()
-            # iterate n-grams' n=32, 24, 16 bits (4, 3, 2 bytes)
+            # iterate n-grams' n=32, 24, 16 bits (4, 3, 2 bytes), see 3.1.2
             for n in [4, 3, 2]:
                 # entropy filter for each n-gram offset -> field values matrix
                 offsets = entropyFilteredOffsets(self._msgmixlen, n)
