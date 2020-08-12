@@ -5,11 +5,14 @@ from typing import List, Tuple, Dict, Iterable
 import random
 from itertools import groupby, product, chain, combinations
 from collections import Counter
+from abc import ABC, abstractmethod
 
 import numpy
-from netzob.Model.Vocabulary.Messages.AbstractMessage import AbstractMessage
-from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
 from scipy.stats import pearsonr
+from pyitlib import discrete_random_variable as drv
+from netzob.Model.Vocabulary.Messages.AbstractMessage import AbstractMessage
+from netzob.Model.Vocabulary.Messages.L2NetworkMessage import L2NetworkMessage
+from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
 
 from fieldhunter.utils.base import qrAssociationCorrelation, verticalByteMerge, mutualInformationNormalized, \
     list2ranges, Flows, entropyFilteredOffsets, NgramIterator, iterateSelected, intsFromNgrams, \
@@ -317,3 +320,103 @@ class MSGlen(FieldType):
             if ngramIsOverlapping(offset, n, o1, n1):
                 return False
         return True
+
+
+class CategoricalCorrelatedField(FieldType,ABC):
+
+
+    correlationThresh = 0.9  # 0.9, threshold for correlation between host ID and IP address(es) (FH, Sec. 3.2.3)
+    minLenThresh = 4  # host ID fields must at least be 4 bytes long (FH, Sec. 3.2.3)
+    n = 1
+
+    @classmethod
+    @abstractmethod
+    def _values2correlate2(cls, messages: List[L2NetworkMessage]):
+        raise NotImplementedError("Implement this abstract class method in a subclass.")
+
+    @classmethod
+    def correlate(cls, messages: List[L2NetworkMessage]):
+        # ngram at offset and src address
+        ngramsSrcs = list()
+        categoricalCorrelation = list()
+        corrValues = cls._values2correlate2(messages)
+        # Host-ID uses 8-bit/1-byte n-grams according to FH, Sec. 3.1.2, but this does not work well (see below)
+        for ngrams in zip(*(NgramIterator(msg, n=CategoricalCorrelatedField.n) for msg in messages)):
+            ngSc = numpy.array([intsFromNgrams(ngrams), corrValues])
+            # categoricalCorrelation: R(x, y) = I(x: y)/H(x, y) \in [0,1]
+            catCorr = drv.information_mutual(ngSc[0], ngSc[1]) / drv.entropy_joint(ngSc)
+            ngramsSrcs.append(ngSc)
+            categoricalCorrelation.append(catCorr)
+        return categoricalCorrelation
+
+        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+        # # # Investigate low categoricalCorrelation for all but one byte within an address field (see NTP and DHCP).
+        # # # According to NTP offset 12 (REF ID, often DST IP address) and DHCP offsets (12, 17, and) 20 (IPs)
+        # # # this works in principle, but if the n-gram is too short the correlation gets lost some n-grams.
+        # print(tabulate(zip(*[categoricalCorrelation]), showindex="always"))
+        # from matplotlib import pyplot
+        # pyplot.bar(range(len(categoricalCorrelation)), categoricalCorrelation)
+        # pyplot.show()
+        # # sum([msg.data[20:24] == bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
+        # # sum([int.from_bytes(messages[m].data[20:24], "big") == srcs[m] for m in range(len(messages))])
+        # # # While the whole bootp.ip.server [20:24] correlates nicely to the IP address, single n-grams don't.
+        # serverIP = [(int.from_bytes(messages[m].data[20:24], "big"), srcs[m]) for m in range(len(messages))]
+        # serverIP0 = [(messages[m].data[20], srcs[m]) for m in range(len(messages))]
+        # serverIP1 = [(messages[m].data[21], srcs[m]) for m in range(len(messages))]
+        # serverIP2 = [(messages[m].data[22], srcs[m]) for m in range(len(messages))]
+        # serverIP3 = [(messages[m].data[23], srcs[m]) for m in range(len(messages))]
+        # # nsp = numpy.array([sip for sip in serverIP])
+        # # # The correlation is perfect, if null values are omitted
+        # nsp = numpy.array([sip for sip in serverIP if sip[0] != 0])   #  and sip[0] == sip[1]
+        # # nsp0 = numpy.array(serverIP0)
+        # # nsp1 = numpy.array(serverIP1)
+        # # nsp2 = numpy.array(serverIP2)
+        # # nsp3 = numpy.array(serverIP3)
+        # nsp0 = numpy.array([sip for sip in serverIP0 if sip[0] != 0])
+        # nsp1 = numpy.array([sip for sip in serverIP1 if sip[0] != 0])
+        # nsp2 = numpy.array([sip for sip in serverIP2 if sip[0] != 0])
+        # nsp3 = numpy.array([sip for sip in serverIP3 if sip[0] != 0])
+        # for serverSrcPairs in [nsp, nsp0, nsp1, nsp2, nsp3]:
+        #     print(drv.information_mutual(serverSrcPairs[:, 0], serverSrcPairs[:, 1]) / drv.entropy_joint(serverSrcPairs.T))
+        # # # This is no implementation error, but raises doubts about the Host-ID description completeness:
+        # # # Probably it does not mention a Entropy filter, direction separation, or - most probably - an iterative n-gram size
+        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+        # merge consecutive candidate n-grams with categoricalCorrelation > hostCorrelationThresh
+
+    @classmethod
+    def catCorrPosLen(cls, categoricalCorrelation: List[float]):
+        catCorrOffsets = [ offset for offset, catCorr in enumerate(categoricalCorrelation)
+                           if catCorr > cls.correlationThresh ]
+        catCorrRanges = list2ranges(catCorrOffsets)
+
+        # discard short fields < minHostLenThresh
+        return [ (start, end+1-start) for start, end in catCorrRanges if end+1-start >= cls.minLenThresh ]
+
+    @classmethod
+    def _posLen2segments(cls, messages: List[L2NetworkMessage], posLen: List[Tuple[int, int]]) \
+            -> List[List[TypedSegment]]:
+        # Generate Segments from remaining field ranges
+        segments = list()
+        for message in messages:
+            mval = Value(message)
+            segs4msg = list()
+            for start, length in posLen:
+                segs4msg.append(TypedSegment(mval, start, length, cls.typelabel))
+            segments.append(segs4msg)
+        return segments
+
+class HostID(CategoricalCorrelatedField):
+    typelabel = 'Host-ID'
+
+    def __init__(self, messages: List[L2NetworkMessage]):
+        super().__init__()
+        self._messages = messages
+        self._categoricalCorrelation = type(self).correlate(messages)
+        self._catCorrPosLen = type(self).catCorrPosLen(self._categoricalCorrelation)
+        self._segments = type(self)._posLen2segments(messages, self._catCorrPosLen)
+
+    def _values2correlate2(cls, messages: List[L2NetworkMessage]):
+        # recover byte representation of ipv4 address from Netzob message and make one int out if each
+        return intsFromNgrams([bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
+
