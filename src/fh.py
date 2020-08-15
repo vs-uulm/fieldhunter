@@ -111,7 +111,13 @@ if __name__ == '__main__':
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
     # TODO Trans-ID (FH, Section 3.2.5, Fig. 3 right)
-
+    # "random across vertical and horizontal collections" (FH, Sec. 3.2.5)
+    #   entropy in c2s/s2c + flows: threshold for high?
+    # req./resp. pairs: search for n-grams with constant values (differing offsets allowed)
+    # measure consistency: offsets recognized in more than transSupportThresh of conversations
+    # merge and filter n-grams
+    transSupportThresh = 0.8  # enough support in conversations (FH, Sec. 3.2.5)
+    minTransLengths = 2  # merged n-grams must at least be this amount of bytes long
 
 
     # TODO Accumulators (FH, Section 3.2.6)
