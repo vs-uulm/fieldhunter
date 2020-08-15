@@ -323,24 +323,40 @@ class MSGlen(FieldType):
 
 
 class CategoricalCorrelatedField(FieldType,ABC):
-
-
+    """
+    Abstract class for inferring field types using categorical correlation of n-gram values with external values, e. g.,
+    environmental information like addresses from encapsulation.
+    """
     correlationThresh = 0.9  # 0.9, threshold for correlation between host ID and IP address(es) (FH, Sec. 3.2.3)
     minLenThresh = 4  # host ID fields must at least be 4 bytes long (FH, Sec. 3.2.3)
-    n = 1
+    n = 1  # Host-ID uses 8-bit/1-byte n-grams according to FH, Sec. 3.1.2, but this does not work well (see below)
 
     @classmethod
     @abstractmethod
     def _values2correlate2(cls, messages: List[L2NetworkMessage]):
+        """
+        Implement to determine the external values to correlate the n-grams of messages with.
+
+        :param messages: Messages for which to generate correlation values.
+        :return: The list of values, one for each message in the given order, to correlate to.
+        """
         raise NotImplementedError("Implement this abstract class method in a subclass.")
 
     @classmethod
     def correlate(cls, messages: List[L2NetworkMessage]):
+        """
+        Generate n-grams at the same offsets for each message an correlate each n-gram using
+        categorical correlation: R(x, y) = I(x: y)/H(x, y) \in [0,1]
+        Uses cls.n to determine the n-gram sizes.
+
+        :param messages: Messages to generate n-grams to correlate to.
+        :return: Correlation values for each offset of n-grams generated from the messages.
+        """
         # ngram at offset and src address
         ngramsSrcs = list()
         categoricalCorrelation = list()
         corrValues = cls._values2correlate2(messages)
-        # Host-ID uses 8-bit/1-byte n-grams according to FH, Sec. 3.1.2, but this does not work well (see below)
+        # Iterate n-grams of all messages
         for ngrams in zip(*(NgramIterator(msg, n=CategoricalCorrelatedField.n) for msg in messages)):
             ngSc = numpy.array([intsFromNgrams(ngrams), corrValues])
             # categoricalCorrelation: R(x, y) = I(x: y)/H(x, y) \in [0,1]
@@ -349,54 +365,32 @@ class CategoricalCorrelatedField(FieldType,ABC):
             categoricalCorrelation.append(catCorr)
         return categoricalCorrelation
 
-        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-        # # # Investigate low categoricalCorrelation for all but one byte within an address field (see NTP and DHCP).
-        # # # According to NTP offset 12 (REF ID, often DST IP address) and DHCP offsets (12, 17, and) 20 (IPs)
-        # # # this works in principle, but if the n-gram is too short the correlation gets lost some n-grams.
-        # print(tabulate(zip(*[categoricalCorrelation]), showindex="always"))
-        # from matplotlib import pyplot
-        # pyplot.bar(range(len(categoricalCorrelation)), categoricalCorrelation)
-        # pyplot.show()
-        # # sum([msg.data[20:24] == bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
-        # # sum([int.from_bytes(messages[m].data[20:24], "big") == srcs[m] for m in range(len(messages))])
-        # # # While the whole bootp.ip.server [20:24] correlates nicely to the IP address, single n-grams don't.
-        # serverIP = [(int.from_bytes(messages[m].data[20:24], "big"), srcs[m]) for m in range(len(messages))]
-        # serverIP0 = [(messages[m].data[20], srcs[m]) for m in range(len(messages))]
-        # serverIP1 = [(messages[m].data[21], srcs[m]) for m in range(len(messages))]
-        # serverIP2 = [(messages[m].data[22], srcs[m]) for m in range(len(messages))]
-        # serverIP3 = [(messages[m].data[23], srcs[m]) for m in range(len(messages))]
-        # # nsp = numpy.array([sip for sip in serverIP])
-        # # # The correlation is perfect, if null values are omitted
-        # nsp = numpy.array([sip for sip in serverIP if sip[0] != 0])   #  and sip[0] == sip[1]
-        # # nsp0 = numpy.array(serverIP0)
-        # # nsp1 = numpy.array(serverIP1)
-        # # nsp2 = numpy.array(serverIP2)
-        # # nsp3 = numpy.array(serverIP3)
-        # nsp0 = numpy.array([sip for sip in serverIP0 if sip[0] != 0])
-        # nsp1 = numpy.array([sip for sip in serverIP1 if sip[0] != 0])
-        # nsp2 = numpy.array([sip for sip in serverIP2 if sip[0] != 0])
-        # nsp3 = numpy.array([sip for sip in serverIP3 if sip[0] != 0])
-        # for serverSrcPairs in [nsp, nsp0, nsp1, nsp2, nsp3]:
-        #     print(drv.information_mutual(serverSrcPairs[:, 0], serverSrcPairs[:, 1]) / drv.entropy_joint(serverSrcPairs.T))
-        # # # This is no implementation error, but raises doubts about the Host-ID description completeness:
-        # # # Probably it does not mention a Entropy filter, direction separation, or - most probably - an iterative n-gram size
-        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
-        # merge consecutive candidate n-grams with categoricalCorrelation > hostCorrelationThresh
-
     @classmethod
     def catCorrPosLen(cls, categoricalCorrelation: List[float]):
+        """
+        Merge consecutive candidate n-grams with categoricalCorrelation > correlationThresh.
+        Filters n-gram offsets on defined thresholds (FH, Sec. 3.2.3) by their categorical correlation values to
+            * correlation between host ID and IP address(es) > correlationThresh
+            * discard short fields < minHostLenThresh
+
+        :param categoricalCorrelation: Correlation values for each offset of n-grams generated from the messages.
+        :return: List of start-length tuples with categorical correlation above threshold and not being a short field.
+        """
         catCorrOffsets = [ offset for offset, catCorr in enumerate(categoricalCorrelation)
                            if catCorr > cls.correlationThresh ]
         catCorrRanges = list2ranges(catCorrOffsets)
-
         # discard short fields < minHostLenThresh
         return [ (start, end+1-start) for start, end in catCorrRanges if end+1-start >= cls.minLenThresh ]
 
     @classmethod
     def _posLen2segments(cls, messages: List[L2NetworkMessage], posLen: List[Tuple[int, int]]) \
             -> List[List[TypedSegment]]:
-        # Generate Segments from remaining field ranges
+        """
+        Generate Segments from remaining field ranges.
+        :param messages: Messages to generate n-grams to correlate to.
+        :param posLen: List of start-length tuples to create messages from.
+        :return: Lists of segments per message generated from the posLen parameter.
+        """
         segments = list()
         for message in messages:
             mval = Value(message)
@@ -406,7 +400,17 @@ class CategoricalCorrelatedField(FieldType,ABC):
             segments.append(segs4msg)
         return segments
 
+    @property
+    def categoricalCorrelation(self):
+        # Attribute needs to be defined in subclass init.
+        return self._categoricalCorrelation
+
+
 class HostID(CategoricalCorrelatedField):
+    """
+    Host identifier (Host-ID) inference (FH, Sec. 3.2.3)
+    Find n-gram that is strongly correlated with IP address of sender.
+    """
     typelabel = 'Host-ID'
 
     def __init__(self, messages: List[L2NetworkMessage]):
@@ -416,7 +420,48 @@ class HostID(CategoricalCorrelatedField):
         self._catCorrPosLen = type(self).catCorrPosLen(self._categoricalCorrelation)
         self._segments = type(self)._posLen2segments(messages, self._catCorrPosLen)
 
+    @classmethod
     def _values2correlate2(cls, messages: List[L2NetworkMessage]):
-        # recover byte representation of ipv4 address from Netzob message and make one int out if each
+        """
+        Recover byte representation of ipv4 address from Netzob message and make one int out if each.
+        :param messages: Messages to generate n-grams to correlate to.
+        :return:
+        """
         return intsFromNgrams([bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
+
+
+class SessionID(CategoricalCorrelatedField):
+    """
+    Session identifier (Session-ID) inference (FH, Section 3.2.4)
+    Find n-gram that is strongly correlated with IP addresses of sender and receiver
+    using categorical correlation like Host-ID.
+
+    Most of FH, Section 3.2.4, refers to Host-ID, so we use all missing details from there and reuse the implementation.
+    """
+    typelabel = 'Session-ID'
+
+    def __init__(self, messages: List[L2NetworkMessage]):
+        super().__init__()
+        self._messages = messages
+        # iterate the ngrams (n=1) and create a ngScDs (instead of just ngSc: ngram/source/destination)
+        # correlate n-grams to (client IP, server IP) tuple by calculating the catCorr for the
+        #   ngram and the source/destination tuple (TODO check out how to nest the tuple right)
+        self._categoricalCorrelation = type(self).correlate(messages)
+        self._catCorrPosLen = type(self).catCorrPosLen(self._categoricalCorrelation)
+        self._segments = type(self)._posLen2segments(messages, self._catCorrPosLen)
+
+    @classmethod
+    def _values2correlate2(cls, messages: List[L2NetworkMessage]):
+        """
+        Get source AND destination addresses in same manner as (just) source for Host-ID.
+        Recover byte representation of ipv4 address from Netzob message and make one int out if each.
+        :param messages: Messages to generate n-grams to correlate to.
+        :return: integer representation of source and destination addresses for each message.
+        """
+        return intsFromNgrams([bytes(map(int,
+                                         msg.source.rpartition(':')[0].split('.') +
+                                         msg.destination.rpartition(':')[0].split('.'))
+                                     ) for msg in messages])
+
+
 
