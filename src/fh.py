@@ -125,6 +125,10 @@ if __name__ == '__main__':
     c2s, s2c = flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
     _c2sEntropyFiltered = entropyFilteredOffsets(c2s, 1)
     _s2cEntropyFiltered = entropyFilteredOffsets(s2c, 1)
+    # print('_c2sEntropyFiltered')
+    # pprint(_c2sEntropyFiltered)
+    # print('_s2cEntropyFiltered')
+    # pprint(_s2cEntropyFiltered)
 
     # # TODO horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
     _c2sConvsEntropy = dict()
@@ -133,6 +137,10 @@ if __name__ == '__main__':
     _s2cConvsEntropy = dict()
     for key, conv in flows.s2cInConversations().items():
         _s2cConvsEntropy[key] = pyitNgramEntropy(conv, n)
+    # print('_c2sConvsEntropy')
+    # pprint(_c2sConvsEntropy)
+    # print('_s2cConvsEntropy')
+    # pprint(_s2cConvsEntropy)
 
     _c2sConvsEntropyFiltered = dict()
     for key, conv in flows.c2sInConversations().items():
@@ -148,11 +156,16 @@ if __name__ == '__main__':
         if len(conv) <= 1:
             continue
         _s2cConvsEntropyFiltered[key] = entropyFilteredOffsets(conv, 1, False)
+    # print('_c2sConvsEntropyFiltered')
+    # pprint(_c2sConvsEntropyFiltered)
+    # print('_s2cConvsEntropyFiltered')
+    # pprint(_s2cConvsEntropyFiltered)
 
     # # req./resp. pairs: search for n-grams with constant values (differing offsets allowed)
     # # compute Q->R association
     # mqr = flows.matchQueryRespone()
     # # TODO from the n-gram offsets that passed the entropy-filters determine those that have the same value in mqr pairs
+    
 
     # measure consistency: offsets recognized in more than transSupportThresh of conversations
     # merge and filter n-grams
