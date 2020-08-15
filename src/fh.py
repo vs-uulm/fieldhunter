@@ -101,7 +101,7 @@ if __name__ == '__main__':
 
     # # Session-ID (FH, Section 3.2.4)
     # sessionidfields = SessionID(messages)
-    # # Problem similar to Host-ID leas to same bad performance.
+    # # Problem similar to Host-ID leads to same bad performance.
     # # Moreover, Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence.
     # print(HostID.catCorrPosLen(sessionidfields.categoricalCorrelation))
 
@@ -111,13 +111,53 @@ if __name__ == '__main__':
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
     # TODO Trans-ID (FH, Section 3.2.5, Fig. 3 right)
+    transSupportThresh = 0.8  # enough support in conversations (FH, Sec. 3.2.5)
+    minFieldLength = 2  # merged n-grams must at least be this amount of bytes long
+    # n-gram size is not explicitly given in FH, but the description (merging, sharp drops in entropy in Fig. 6)
+    #   leads to assuming it should be 1.
+    n = 1
+
     # "random across vertical and horizontal collections" (FH, Sec. 3.2.5)
-    #   entropy in c2s/s2c + flows: threshold for high?
-    # req./resp. pairs: search for n-grams with constant values (differing offsets allowed)
+    #   entropy in c2s/s2c + flows: threshold for high entropy is not given in FH! Use value determined
+    #   by own empirics in base.entropyThresh
+
+    # vertical collections
+    c2s, s2c = flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
+    _c2sEntropyFiltered = entropyFilteredOffsets(c2s, 1)
+    _s2cEntropyFiltered = entropyFilteredOffsets(s2c, 1)
+
+    # # TODO horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
+    _c2sConvsEntropy = dict()
+    for key, conv in flows.c2sInConversations().items():
+        _c2sConvsEntropy[key] = pyitNgramEntropy(conv, n)
+    _s2cConvsEntropy = dict()
+    for key, conv in flows.s2cInConversations().items():
+        _s2cConvsEntropy[key] = pyitNgramEntropy(conv, n)
+
+    _c2sConvsEntropyFiltered = dict()
+    for key, conv in flows.c2sInConversations().items():
+        # The entropy is too low if the number of specimens is low -> relative to max
+        #  and ignore conversations of length 1 (TODO probably even more? "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
+        if len(conv) <= 1:
+            continue
+        _c2sConvsEntropyFiltered[key] = entropyFilteredOffsets(conv, 1, False)
+    _s2cConvsEntropyFiltered = dict()
+    for key, conv in flows.s2cInConversations().items():
+        # The entropy is too low if the number of specimens is low -> relative to max
+        #  and ignore conversations of length 1 (TODO probably even more? "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
+        if len(conv) <= 1:
+            continue
+        _s2cConvsEntropyFiltered[key] = entropyFilteredOffsets(conv, 1, False)
+
+    # # req./resp. pairs: search for n-grams with constant values (differing offsets allowed)
+    # # compute Q->R association
+    # mqr = flows.matchQueryRespone()
+    # # TODO from the n-gram offsets that passed the entropy-filters determine those that have the same value in mqr pairs
+
     # measure consistency: offsets recognized in more than transSupportThresh of conversations
     # merge and filter n-grams
-    transSupportThresh = 0.8  # enough support in conversations (FH, Sec. 3.2.5)
-    minTransLengths = 2  # merged n-grams must at least be this amount of bytes long
+
+
 
 
     # TODO Accumulators (FH, Section 3.2.6)

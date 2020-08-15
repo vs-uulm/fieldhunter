@@ -11,9 +11,6 @@ from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
 from nemere.inference.segments import MessageAnalyzer
 
 
-# constants
-entropyThresh = 0.4  # Not given in FH!
-
 
 class NgramIterator(Iterator):
     """
@@ -74,9 +71,35 @@ class Flows(object):
             flows[keytuple].append(msg)
         return flows
 
-    def dialogs(self):
+    @property
+    def flows(self):
+        return self._flows
+
+    def conversations(self):
         """
-        find pairs of flows with src/dst reversed to each other
+        "A conversation is formed of the two flows in opposite direction..." (FH, Footnote 1)
+        :return: Dict of conversations with the c2s flow tuple as key.
+        """
+        return {qkey: self._flows[qkey] + self._flows[rkey]
+                for qkey,rkey in self._dialogs().items() if rkey is not None}
+
+    def c2sInConversations(self):
+        """
+        "A conversation is formed of the two flows in opposite direction..." (FH, Footnote 1)
+        :return: Dict of c2s messages per conversation with the c2s flow tuple as key.
+        """
+        return {qkey: self._flows[qkey] for qkey,rkey in self._dialogs().items() if rkey is not None}
+
+    def s2cInConversations(self):
+        """
+        "A conversation is formed of the two flows in opposite direction..." (FH, Footnote 1)
+        :return: Dict of s2c messages per conversation with the c2s flow tuple as key.
+        """
+        return {qkey: self._flows[rkey] for qkey,rkey in self._dialogs().items() if rkey is not None}
+
+    def _dialogs(self):
+        """
+        find pairs of flows with src/dst and reversed to each other.
         """
         dialogs = dict()
         for keytuple in self._flows.keys():
@@ -102,7 +125,7 @@ class Flows(object):
 
         FH, Section 2, Footnote 1
         """
-        dialogs = self.dialogs()
+        dialogs = self._dialogs()
         # merge all client flows into one and all server flows into another list of messages
         c2s = list(chain.from_iterable(self._flows[keytuple] for keytuple in dialogs.keys() if dialogs[keytuple] is not None))
         s2c = list(chain.from_iterable(self._flows[keytuple] for keytuple in dialogs.values() if keytuple is not None))
@@ -110,10 +133,12 @@ class Flows(object):
 
     def matchQueryRespone(self):
         """
+        Match queries with responses in the flows by identifying
+        for each client-to-server message (query) the server-to-client message (response)
+        that has the closest subsequent transmission time.
 
-        mqr = flows.matchQueryRespone()
-        print(tabulate([(q.date, r.date) for q, r in mqr.items()]))
-
+        >>> mqr = flows.matchQueryRespone()
+        >>> print(tabulate([(q.date, r.date) for q, r in mqr.items()]))
         """
         dialogs = self.dialogs()
         qr = dict()
@@ -144,7 +169,7 @@ class Flows(object):
         return qr
 
 
-def entropyVertical(messages: List[AbstractMessage], n=1):
+def ngramEntropy(messages: List[AbstractMessage], n=1):
     """
     The vertical entropies for each offset of all the n-grams at the same offset throughout all messages.
     Own entropy calculation implementation. See #pyitEntropyVertical
@@ -164,12 +189,12 @@ def intsFromNgrams(ngrams: Iterable[bytes], endianness='big'):
     return [int.from_bytes(b, endianness) for b in ngrams]
 
 
-def pyitEntropyVertical(messages: List[AbstractMessage], n=1, endianness='big'):
+def pyitNgramEntropy(messages: List[AbstractMessage], n=1, endianness='big'):
     """
     The vertical entropies for each offset of all the n-grams at the same offset throughout all messages
     Implementation of entropy calculation from pyitlib. See #entropyVertical
 
-    >>> entropyVertical(messages) == pyitEntropyVertical(messages)
+    >>> ngramEntropy(messages) == pyitNgramEntropy(messages)
 
     FH, Section 3.2.1
     """
@@ -184,19 +209,23 @@ def pyitEntropyVertical(messages: List[AbstractMessage], n=1, endianness='big'):
     return vEntropy
 
 
-def entropyFilteredOffsets(messages: List[AbstractMessage], n: int):
+def entropyFilteredOffsets(messages: List[AbstractMessage], n: int, absolute = True):
     """
-    Find offsets of n-grams (with the same offset in different messages of the list), that are not constant and not
-    random, i. e., that have a entropy > 0 and < x (threshold)
+    Find offsets of n-grams (with the same offset in different messages of the list), that are random,
+    i. e., that have a entropy > x (threshold)
 
-    FH, Section 3.2.1
+    FH, Section 3.2.5
 
     :param messages: Messages to generate n-grams from
     :param n: The $n$ in n-gram
+    :param absolute: Use the absolute constant for the threshold if true,
+        make it relative to the maximum entropy if False.
     :return: Returns a list of offsets that have non-constant and non-random (below entropyThresh) entropy.
     """
-    entropy = pyitEntropyVertical(messages, n)
-    return [offset for offset, entropy in enumerate(entropy) if 0 < entropy < entropyThresh]
+    entropyThresh = 0.8  # Value not given in FH!
+    entropy = pyitNgramEntropy(messages, n)
+    entropyThresh = entropyThresh if absolute else max(entropy) * entropyThresh
+    return [offset for offset, entropy in enumerate(entropy) if entropy > entropyThresh]
 
 
 def mutualInformationNormalized(qInts: List[List[int]], rInts: List[List[int]]):
