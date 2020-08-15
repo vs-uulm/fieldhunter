@@ -15,13 +15,13 @@ from netzob.Model.Vocabulary.Messages.L2NetworkMessage import L2NetworkMessage
 from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
 
 from fieldhunter.utils.base import qrAssociationCorrelation, verticalByteMerge, mutualInformationNormalized, \
-    list2ranges, Flows, entropyFilteredOffsets, NgramIterator, iterateSelected, intsFromNgrams, \
-    ngramIsOverlapping
+    list2ranges, Flows, NgramIterator, iterateSelected, intsFromNgrams, \
+    ngramIsOverlapping, pyitNgramEntropy
 from nemere.inference.analyzers import Value
 from nemere.inference.segments import TypedSegment
 
 
-class FieldType(object):
+class FieldType(ABC):
     typelabel = None
 
     def __init__(self):
@@ -34,7 +34,28 @@ class FieldType(object):
         """
         return self._segments
 
-class MSGtype(FieldType):
+
+class NonConstantNonRandomEntropyFieldType(FieldType, ABC):
+    # constant entropyThresh: value 0.4 determined by own empirics (notes about that?)
+    entropyThresh = 0.4  # Value not given in FH!
+
+    @classmethod
+    def entropyFilteredOffsets(cls, messages: List[AbstractMessage], n: int):
+        """
+        Find offsets of n-grams (with the same offset in different messages of the list), that are not constant and not
+        random, i. e., that have a entropy > 0 and < x (threshold)
+
+        FH, Section 3.2.1
+
+        :param messages: Messages to generate n-grams from
+        :param n: The $n$ in n-gram
+        :return: Returns a list of offsets that have non-constant and non-random (below entropyThresh) entropy.
+        """
+        entropy = pyitNgramEntropy(messages, n)
+        return [offset for offset, entropy in enumerate(entropy) if 0 < entropy < cls.entropyThresh]
+
+
+class MSGtype(NonConstantNonRandomEntropyFieldType):
     """
     Message type (MSG-Type) inference (FH, Section 3.2.1, Fig. 3 left).
 
@@ -56,8 +77,8 @@ class MSGtype(FieldType):
         # print(tabulate(zip(c2sEntropy, s2cEntropy), headers=["c2s", "s2c"], showindex=True))
 
         # discard constant and random offsets
-        self._c2sEntropyFiltered = entropyFilteredOffsets(c2s, 1)
-        self._s2cEntropyFiltered = entropyFilteredOffsets(s2c, 1)
+        self._c2sEntropyFiltered = type(self).entropyFilteredOffsets(c2s, 1)
+        self._s2cEntropyFiltered = type(self).entropyFilteredOffsets(s2c, 1)
         # print(c2sEntropyFiltered)
         # print(s2cEntropyFiltered)
 
@@ -65,7 +86,7 @@ class MSGtype(FieldType):
         # print(tabulate(Counter(msg.data[2:4].hex() for msg in c2s).most_common()))
         # print(tabulate(Counter(msg.data[2:4].hex() for msg in s2c).most_common()))
 
-        # compute Q->R association/
+        # compute Q->R association
         mqr = flows.matchQueryRespone()
         # Mutual information
         self._qrCausality = qrAssociationCorrelation(mqr)
@@ -146,7 +167,7 @@ class MSGtype(FieldType):
         return self._msgtypeRanges
 
 
-class MSGlen(FieldType):
+class MSGlen(NonConstantNonRandomEntropyFieldType):
     """
     Message length (MSG-Len) inference (FH, Section 3.2.2, Fig. 3 center).
     Application message length, linearly correlates with message size.
@@ -176,6 +197,13 @@ class MSGlen(FieldType):
         return list(chain.from_iterable([mldir.segments for mldir in self._msgDirection]))
 
     class Direction(object):
+        """
+        Encapsulates direction-wise inference of fields.
+        Roughly corresponds to the S2C-collection branch depicted in the flow graph of FH, Fig. 3 center.
+
+        Provides methods to extract different size collections, finding candidates by Pearson correlation coefficient,
+        and verifying the hypothesis of candidates denoting the length of the message.
+        """
         def  __init__(self, direction: List[L4NetworkMessage]):
             self._direction = direction
             # noinspection PyTypeChecker
@@ -238,7 +266,7 @@ class MSGlen(FieldType):
             # iterate n-grams' n=32, 24, 16 bits (4, 3, 2 bytes), see 3.1.2
             for n in [4, 3, 2]:
                 # entropy filter for each n-gram offset -> field values matrix
-                offsets = entropyFilteredOffsets(self._msgmixlen, n)
+                offsets = MSGlen.entropyFilteredOffsets(self._msgmixlen, n)
                 # TODO currently only big endian, see #intsFromNgrams
                 ngIters = (intsFromNgrams(iterateSelected(NgramIterator(msg, n), offsets)) for msg in self._msgmixlen)
                 ngramsAtOffsets = numpy.array(list(ngIters))  # TODO check if null byte ngrams cause problems
@@ -253,7 +281,8 @@ class MSGlen(FieldType):
 
         def verifyCandidates(self):
             """
-            verify length-hypothesis for candidates, solve for values at ngrams in candidateAtNgram (precedence for larger n)
+            Verify length-hypothesis for candidates, solve for values at ngrams
+            in candidateAtNgram (precedence for larger n).
               MSG_len = a * value + b (a > 0, b \in N)  - "Msg. Len. Model Parameters"
                   lens4msgmix = ngramsAtOffsets[:,candidateAtNgram[n]] * a + 1 * b
               threshold 0.9 of the message pairs with different lengths
