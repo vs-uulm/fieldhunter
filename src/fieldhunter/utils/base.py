@@ -127,8 +127,8 @@ class Flows(object):
         """
         dialogs = self._dialogs()
         # merge all client flows into one and all server flows into another list of messages
-        c2s = list(chain.from_iterable(self._flows[keytuple] for keytuple in dialogs.keys() if dialogs[keytuple] is not None))
-        s2c = list(chain.from_iterable(self._flows[keytuple] for keytuple in dialogs.values() if keytuple is not None))
+        c2s = list(chain.from_iterable(self.c2sInConversations().values()))
+        s2c = list(chain.from_iterable(self.s2cInConversations().values()))
         return c2s, s2c
 
     def matchQueryRespone(self):
@@ -140,7 +140,7 @@ class Flows(object):
         >>> mqr = flows.matchQueryRespone()
         >>> print(tabulate([(q.date, r.date) for q, r in mqr.items()]))
         """
-        dialogs = self.dialogs()
+        dialogs = self._dialogs()
         qr = dict()
 
         for keytuple in dialogs.keys():
