@@ -34,6 +34,24 @@ class FieldType(ABC):
         """
         return self._segments
 
+    @classmethod
+    def _posLen2segments(cls, messages: List[L2NetworkMessage], posLen: Iterable[Tuple[int, int]]) \
+            -> List[List[TypedSegment]]:
+        """
+        Generate Segments from remaining field ranges.
+        :param messages: Messages to generate n-grams to correlate to.
+        :param posLen: List of start-length tuples to create messages from.
+        :return: Lists of segments per message generated from the posLen parameter.
+        """
+        segments = list()
+        for message in messages:
+            mval = Value(message)
+            segs4msg = list()
+            for start, length in posLen:
+                segs4msg.append(TypedSegment(mval, start, length, cls.typelabel))
+            segments.append(segs4msg)
+        return segments
+
 
 class NonConstantNonRandomEntropyFieldType(FieldType, ABC):
     # constant entropyThresh: value 0.4 determined by own empirics (notes about that?)
@@ -116,12 +134,7 @@ class MSGtype(NonConstantNonRandomEntropyFieldType):
 
         # create segments from bytes in mergingOffsets (and TODO compare to dissector/field type)
         self._msgtypeRanges = list2ranges(self.offsets)
-        for message in c2s + s2c:
-            mval = Value(message)
-            segs4msg = list()
-            for start, end in self._msgtypeRanges:
-                segs4msg.append(TypedSegment(mval, start, end + 1 - start, MSGtype.typelabel))
-            self._segments.append(segs4msg)
+        self._segments = type(self)._posLen2segments(c2s + s2c, self._msgtypeRanges)
 
 
     @property
@@ -218,8 +231,8 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
             """Associates offset with a field length (n-gram's n) to define a list of unambiguous MSG-Len candidates"""
             # noinspection PyTypeChecker
             self._acceptedX = None  # type: Dict[int, numpy.ndarray]
-            # noinspection PyTypeChecker
-            self._segments = list()  # type: List[List[TypedSegment]]
+            # # noinspection PyTypeChecker
+            # self._segments = list()  # type: List[List[TypedSegment]]
 
             self.differentSizeCollections()
             self.findCandidates()
@@ -231,13 +244,7 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
             # aX.max(0)
 
             # create segments for each accepted candidate
-            for message in self._direction:
-                mval = Value(message)
-                segs4msg = list()
-                for offset, n in self.acceptedCandidates.items():
-                    if offset + n < len(message.data):
-                        segs4msg.append(TypedSegment(mval, offset, n, MSGlen.typelabel))
-                self._segments.append(segs4msg)
+            self._segments = MSGlen._posLen2segments(self._direction, self.acceptedCandidates.items())
 
         def differentSizeCollections(self):
             """
@@ -411,24 +418,6 @@ class CategoricalCorrelatedField(FieldType,ABC):
         # discard short fields < minHostLenThresh
         return [ (start, end+1-start) for start, end in catCorrRanges if end+1-start >= cls.minLenThresh ]
 
-    @classmethod
-    def _posLen2segments(cls, messages: List[L2NetworkMessage], posLen: List[Tuple[int, int]]) \
-            -> List[List[TypedSegment]]:
-        """
-        Generate Segments from remaining field ranges.
-        :param messages: Messages to generate n-grams to correlate to.
-        :param posLen: List of start-length tuples to create messages from.
-        :return: Lists of segments per message generated from the posLen parameter.
-        """
-        segments = list()
-        for message in messages:
-            mval = Value(message)
-            segs4msg = list()
-            for start, length in posLen:
-                segs4msg.append(TypedSegment(mval, start, length, cls.typelabel))
-            segments.append(segs4msg)
-        return segments
-
     @property
     def categoricalCorrelation(self):
         # Attribute needs to be defined in subclass init.
@@ -493,4 +482,9 @@ class SessionID(CategoricalCorrelatedField):
                                      ) for msg in messages])
 
 
+class TransID(FieldType):
+    """
+
+    """
+    typelabel = 'Trans-ID'
 
