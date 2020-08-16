@@ -130,7 +130,7 @@ if __name__ == '__main__':
     # print('_s2cEntropyFiltered')
     # pprint(_s2cEntropyFiltered)
 
-    # # TODO horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
+    # horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
     _c2sConvsEntropy = dict()
     for key, conv in flows.c2sInConversations().items():
         _c2sConvsEntropy[key] = pyitNgramEntropy(conv, n)
@@ -161,25 +161,72 @@ if __name__ == '__main__':
     # print('_s2cConvsEntropyFiltered')
     # pprint(_s2cConvsEntropyFiltered)
 
-    # # req./resp. pairs: search for n-grams with constant values (differing offsets allowed)
-    # # compute Q->R association
-    # mqr = flows.matchQueryRespone()
-    # # TODO from the n-gram offsets that passed the entropy-filters determine those that have the same value in mqr pairs
-    
+    # req./resp. pairs: search for n-grams with constant values (differing offsets allowed)
+    #
+    # intersection of all c2s and s2c filtered offset lists (per flow)
+    _c2sHorizontalOffsets = set.intersection(*[set(offsetlist) for offsetlist in _c2sConvsEntropyFiltered.values()])
+    _s2cHorizontalOffsets = set.intersection(*[set(offsetlist) for offsetlist in _s2cConvsEntropyFiltered.values()])
+    # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _c2sConvsEntropyFiltered
+    # (TODO use entry for this query specifically?)
+    _c2sCombinedOffsets = _c2sHorizontalOffsets.intersection(_c2sEntropyFiltered)
+    # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _s2cConvsEntropyFiltered
+    # (TODO the entry for this resp specifically?)
+    _s2cCombinedOffsets = _s2cHorizontalOffsets.intersection(_s2cEntropyFiltered)
+    # compute Q->R association
+    mqr = flows.matchQueryRespone()
+    # from the n-gram offsets that passed the entropy-filters determine those that have the same value in mqr pairs
+    valuematch = dict()
+    for query, resp in mqr.items():
+        qrmatchlist = valuematch[(query, resp)] = list()
+        # value in query at any of the offsets in _c2sCombinedOffsets
+        for c2sOffset in _c2sCombinedOffsets:
+            if len(query.data) < c2sOffset + n:
+                continue
+            qvalue = query.data[c2sOffset:c2sOffset + n]
+            # matches a value of resp at any of the offsets in _s2cCombinedOffsets
+            for s2cOffset in _s2cCombinedOffsets:
+                if len(resp.data) < s2cOffset + n:
+                    continue
+                rvalue = resp.data[s2cOffset:s2cOffset + n]
+                if qvalue == rvalue:
+                    qrmatchlist.append((c2sOffset, s2cOffset))
 
     # measure consistency: offsets recognized in more than transSupportThresh of conversations
-    # merge and filter n-grams
+    c2sCandidateCount = Counter()
+    s2cCandidateCount = Counter()
+    for (query, resp), offsetlist in valuematch.items():
+        if len(offsetlist) < 1:
+            continue
+        # transpose to offsets per direction
+        c2sOffsets, s2cOffsets = zip(*offsetlist)
+        c2sCandidateCount.update(set(c2sOffsets))
+        s2cCandidateCount.update(set(s2cOffsets))
+    c2sConsistentCandidates = [offset for offset, cc in c2sCandidateCount.items() if cc > transSupportThresh * len(c2s)]
+    s2cConsistentCandidates = [offset for offset, cc in s2cCandidateCount.items() if cc > transSupportThresh * len(s2c)]
 
+    # merge and filter candidates by minimum length
+    c2sConsistentRanges = [ol for ol in list2ranges(c2sConsistentCandidates) if ol[1] + 1 >= minFieldLength]
+    s2cConsistentRanges = [ol for ol in list2ranges(s2cConsistentCandidates) if ol[1] + 1 >= minFieldLength]
+
+    # TODO place in own class and generate segments
 
 
 
     # TODO Accumulators (FH, Section 3.2.6)
-    # iterate n-grams' n=32, 24, 16 bits (4, 3, 2 bytes), see 3.1.2
+    #   "Accumulators are fields that have increasing values over consecutive message within the same conversation." (FH, Sec. 3.2.6)
 
+    # c2s and s2c independently
+    # iterate n-grams' n = 8, 4, 3, 2
+    # combined from Sec. 3.1.2: n=32, 24, 16 bits (4, 3, 2 bytes) and see Sec. 3.2.6: n=64, 32, 16 bits (8, 4, 2 bytes)
+
+    # calculate delta between n-grams (n and offset identical) two subsequent messages
+    # "compress": ln delta
+    # "fairly constant": relatively low entropy -> threshold (value not given)
+    # check: delta positive and fairly constant
 
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-    # TODO for validation, sub-class nemere.validation.messageParser.ParsingConstants263
-    #   set TYPELOOKUP[x] to the value MSGtype.typelabel ("MSG-Type") for all fields in
+    # TODO for validation, sub-class nemere.validation.messageParser.ParsingConstantsXXX
+    #   set TYPELOOKUP[x] to the value FieldType.typelabel (e. g., "MSG-Type") for all fields in
     #   nemere.validation.messageParser.MessageTypeIdentifiers
 
     # interactive
