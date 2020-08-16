@@ -209,25 +209,6 @@ def pyitNgramEntropy(messages: List[AbstractMessage], n=1, endianness='big'):
     return vEntropy
 
 
-def entropyFilteredOffsets(messages: List[AbstractMessage], n: int, absolute = True):
-    """
-    Find offsets of n-grams (with the same offset in different messages of the list), that are random,
-    i. e., that have a entropy > x (threshold)
-
-    FH, Section 3.2.5
-
-    :param messages: Messages to generate n-grams from
-    :param n: The $n$ in n-gram
-    :param absolute: Use the absolute constant for the threshold if true,
-        make it relative to the maximum entropy if False.
-    :return: Returns a list of offsets that have non-constant and non-random (below entropyThresh) entropy.
-    """
-    entropyThresh = 0.8  # Value not given in FH!
-    entropy = pyitNgramEntropy(messages, n)
-    entropyThresh = entropyThresh if absolute else max(entropy) * entropyThresh
-    return [offset for offset, entropy in enumerate(entropy) if entropy > entropyThresh]
-
-
 def mutualInformationNormalized(qInts: List[List[int]], rInts: List[List[int]]):
     """
 
@@ -313,8 +294,8 @@ def iterateSelected(toIter: Iterator, selectors: List[int]):
 
 def list2ranges(offsets: List[int]):
     """
-    Generate ranges from a list of integer values. The ranges denote the starts end ends of any subsequence of
-    adjacent values, e. g. the list [1,2,3,6,7,20] would result in the ranges [(1,3),(6,7),(20,20)]
+    Generate ranges from a list of integer values. The ranges denote the starts and lengths of any subsequence of
+    adjacent values, e. g. the list [1,2,3,6,7,20] would result in the ranges [(1,3),(6,2),(20,1)]
 
     :param offsets:
     :return:
@@ -335,7 +316,7 @@ def list2ranges(offsets: List[int]):
             # start a new range
             start = offs
         last = offs
-    ranges.append((start, last))
+    ranges.append((start, last - start + 1))
 
     return ranges
 

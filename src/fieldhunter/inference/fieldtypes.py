@@ -416,7 +416,7 @@ class CategoricalCorrelatedField(FieldType,ABC):
                            if catCorr > cls.correlationThresh ]
         catCorrRanges = list2ranges(catCorrOffsets)
         # discard short fields < minHostLenThresh
-        return [ (start, end+1-start) for start, end in catCorrRanges if end+1-start >= cls.minLenThresh ]
+        return [ (start, length) for start, length in catCorrRanges if length >= cls.minLenThresh ]
 
     @property
     def categoricalCorrelation(self):
@@ -484,7 +484,168 @@ class SessionID(CategoricalCorrelatedField):
 
 class TransID(FieldType):
     """
-
+    Transaction identifier (Trans-ID) inference (FH, Section 3.2.5, Fig. 3 right)
     """
     typelabel = 'Trans-ID'
+
+    transSupportThresh = 0.8  # enough support in conversations (FH, Sec. 3.2.5)
+    minFieldLength = 2  # merged n-grams must at least be this amount of bytes long
+    # n-gram size is not explicitly given in FH, but the description (merging, sharp drops in entropy in Fig. 6)
+    #   leads to assuming it should be 1.
+    n = 1
+    entropyThresh = 0.8  # Value not given in FH!
+    # entropy in c2s/s2c + flows: threshold for high entropy is not given in FH! Use value determined
+    #   by own empirics in base.entropyThresh
+
+    def __init__(self, flows: Flows):
+        super().__init__()
+
+        # prepare instance attributes
+        self._flows = flows
+        self._c2s, self._s2c = self._flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
+        self._c2sEntropyFiltered = None
+        self._s2cEntropyFiltered = None
+        self._c2sConvsEntropyFiltered = dict()
+        self._s2cConvsEntropyFiltered = dict()
+        self._c2sHorizontalOffsets = None
+        self._s2cHorizontalOffsets = None
+        self._c2sCombinedOffsets = None
+        self._s2cCombinedOffsets = None
+        self._valuematch = dict()
+        self._c2sConsistentRanges = None  # type: Iterable[Tuple[int, int]]
+        self._s2cConsistentRanges = None  # type: Iterable[Tuple[int, int]]
+
+        # Infer
+        self._verticalAndHorizontalRandomNgrams()
+        self._constantQRvalues()
+        self._consistentCandidates()
+        self._c2sConsistentRanges = type(self)._mergeAndFilter(self._c2sConsistentCandidates)
+        self._s2cConsistentRanges = type(self)._mergeAndFilter(self._s2cConsistentCandidates)
+        self._segments = \
+            type(self)._posLen2segments(self._c2s, self._c2sConsistentRanges) + \
+            type(self)._posLen2segments(self._s2c, self._s2cConsistentRanges)
+
+    @classmethod
+    def entropyFilteredOffsets(cls, messages: List[AbstractMessage], absolute=True):
+        """
+        Find offsets of n-grams (with the same offset in different messages of the list), that are random,
+        i. e., that have a entropy > x (threshold)
+
+        FH, Section 3.2.5
+
+        :param messages: Messages to generate n-grams from
+        :param absolute: Use the absolute constant for the threshold if true,
+            make it relative to the maximum entropy if False.
+        :return: Returns a list of offsets that have non-constant and non-random (below entropyThresh) entropy.
+        """
+        entropy = pyitNgramEntropy(messages, cls.n)
+        entropyThresh = cls.entropyThresh if absolute else max(entropy) * cls.entropyThresh
+        return [offset for offset, entropy in enumerate(entropy) if entropy > entropyThresh]
+
+    def _verticalAndHorizontalRandomNgrams(self):
+        """
+        Determine n-grams that are "random across vertical and horizontal collections" (FH, Sec. 3.2.5).
+
+        Output is written to self._c2sCombinedOffsets and self._s2cCombinedOffsets.
+        Moreover, intermediate results are persisted in instance attributes for evaluation.
+        """
+        # vertical collections
+        c2s, s2c = self._flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
+        self._c2sEntropyFiltered = type(self).entropyFilteredOffsets(c2s)
+        self._s2cEntropyFiltered = type(self).entropyFilteredOffsets(s2c)
+        # print('_c2sEntropyFiltered')
+        # pprint(self._c2sEntropyFiltered)
+        # print('_s2cEntropyFiltered')
+        # pprint(self._s2cEntropyFiltered)
+
+        # # horizontal collections: intermediate entropy of n-grams for debugging
+        # self._c2sConvsEntropy = dict()
+        # for key, conv in self._flows.c2sInConversations().items():
+        #     self._c2sConvsEntropy[key] = pyitNgramEntropy(conv, type(self).n)
+        # self._s2cConvsEntropy = dict()
+        # for key, conv in self._flows.s2cInConversations().items():
+        #     self._s2cConvsEntropy[key] = pyitNgramEntropy(conv, type(self).n)
+        # print('_c2sConvsEntropy')
+        # pprint(self._c2sConvsEntropy)
+        # print('_s2cConvsEntropy')
+        # pprint(self._s2cConvsEntropy)
+
+        # horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
+        for key, conv in self._flows.c2sInConversations().items():
+            # The entropy is too low if the number of specimens is low -> relative to max
+            #  and ignore conversations of length 1 (TODO probably even more? "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
+            if len(conv) <= 1:
+                continue
+            self._c2sConvsEntropyFiltered[key] = type(self).entropyFilteredOffsets(conv, False)
+        for key, conv in self._flows.s2cInConversations().items():
+            # The entropy is too low if the number of specimens is low -> relative to max
+            #  and ignore conversations of length 1 (TODO probably even more? "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
+            if len(conv) <= 1:
+                continue
+            self._s2cConvsEntropyFiltered[key] = type(self).entropyFilteredOffsets(conv, False)
+        # print('_c2sConvsEntropyFiltered')
+        # pprint(_c2sConvsEntropyFiltered)
+        # print('_s2cConvsEntropyFiltered')
+        # pprint(_s2cConvsEntropyFiltered)
+
+        # intersection of all c2s and s2c filtered offset lists (per flow)
+        self._c2sHorizontalOffsets = set.intersection(*[set(offsetlist) for offsetlist in self._c2sConvsEntropyFiltered.values()])
+        self._s2cHorizontalOffsets = set.intersection(*[set(offsetlist) for offsetlist in self._s2cConvsEntropyFiltered.values()])
+        # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _c2sConvsEntropyFiltered
+        # (TODO use entry for this query specifically?)
+        self._c2sCombinedOffsets = self._c2sHorizontalOffsets.intersection(self._c2sEntropyFiltered)
+        # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _s2cConvsEntropyFiltered
+        # (TODO the entry for this resp specifically?)
+        self._s2cCombinedOffsets = self._s2cHorizontalOffsets.intersection(self._s2cEntropyFiltered)
+
+    def _constantQRvalues(self):
+        """
+        Reqest/Response pairs: search for n-grams with constant values (differing offsets allowed)
+
+        Output is placed in self._valuematch.
+        """
+        # compute Q->R association
+        mqr = self._flows.matchQueryRespone()
+        # from the n-gram offsets that passed the entropy-filters determine those that have the same value in mqr pairs
+        for query, resp in mqr.items():
+            qrmatchlist = self._valuematch[(query, resp)] = list()
+            # value in query at any of the offsets in _c2sCombinedOffsets
+            for c2sOffset in self._c2sCombinedOffsets:
+                if len(query.data) < c2sOffset + type(self).n:
+                    continue
+                qvalue = query.data[c2sOffset:c2sOffset + type(self).n]
+                # matches a value of resp at any of the offsets in _s2cCombinedOffsets
+                for s2cOffset in self._s2cCombinedOffsets:
+                    if len(resp.data) < s2cOffset + type(self).n:
+                        continue
+                    rvalue = resp.data[s2cOffset:s2cOffset + type(self).n]
+                    if qvalue == rvalue:
+                        qrmatchlist.append((c2sOffset, s2cOffset))
+
+    def _consistentCandidates(self):
+        """
+        measure consistency: offsets recognized in more than transSupportThresh of conversations
+
+        Output is written to self._c2sConsistentCandidates and self._s2cConsistentCandidates
+        """
+        c2sCandidateCount = Counter()
+        s2cCandidateCount = Counter()
+        for (query, resp), offsetlist in self._valuematch.items():
+            if len(offsetlist) < 1:
+                continue
+            # transpose to offsets per direction
+            c2sOffsets, s2cOffsets = zip(*offsetlist)
+            c2sCandidateCount.update(set(c2sOffsets))
+            s2cCandidateCount.update(set(s2cOffsets))
+        self._c2sConsistentCandidates = [offset for offset, cc in c2sCandidateCount.items() if
+                                   cc > type(self).transSupportThresh * len(self._c2s)]
+        self._s2cConsistentCandidates = [offset for offset, cc in s2cCandidateCount.items() if
+                                   cc > type(self).transSupportThresh * len(self._s2c)]
+
+    @classmethod
+    def _mergeAndFilter(cls, consistentCandidates):
+        """
+        merge and filter candidates by minimum length
+        """
+        return [ol for ol in list2ranges(consistentCandidates) if ol[1] >= cls.minFieldLength]
 

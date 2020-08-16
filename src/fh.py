@@ -20,11 +20,11 @@ from pprint import pprint
 import IPython
 
 from nemere.utils.loader import SpecimenLoader
+from fieldhunter.inference.fieldtypes import *
 from nemere.inference.analyzers import Value
 from nemere.inference.segments import TypedSegment
 from fieldhunter.utils.base import Flows, list2ranges
-from fieldhunter.inference.fieldtypes import *
-from fieldhunter.utils.base import NgramIterator, entropyFilteredOffsets, iterateSelected, intsFromNgrams, ngramIsOverlapping
+from fieldhunter.utils.base import NgramIterator, iterateSelected, intsFromNgrams, ngramIsOverlapping
 
 
 if __name__ == '__main__':
@@ -105,112 +105,14 @@ if __name__ == '__main__':
     # # Moreover, Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence.
     # print(HostID.catCorrPosLen(sessionidfields.categoricalCorrelation))
 
+    # # Trans-ID
+    # transidfields = TransID(flows)
+    # pprint(transidfields.segments)
+
     pass
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # # # TODO Working area
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
-    # TODO Trans-ID (FH, Section 3.2.5, Fig. 3 right)
-    transSupportThresh = 0.8  # enough support in conversations (FH, Sec. 3.2.5)
-    minFieldLength = 2  # merged n-grams must at least be this amount of bytes long
-    # n-gram size is not explicitly given in FH, but the description (merging, sharp drops in entropy in Fig. 6)
-    #   leads to assuming it should be 1.
-    n = 1
-
-    # "random across vertical and horizontal collections" (FH, Sec. 3.2.5)
-    #   entropy in c2s/s2c + flows: threshold for high entropy is not given in FH! Use value determined
-    #   by own empirics in base.entropyThresh
-
-    # vertical collections
-    c2s, s2c = flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
-    _c2sEntropyFiltered = entropyFilteredOffsets(c2s, 1)
-    _s2cEntropyFiltered = entropyFilteredOffsets(s2c, 1)
-    # print('_c2sEntropyFiltered')
-    # pprint(_c2sEntropyFiltered)
-    # print('_s2cEntropyFiltered')
-    # pprint(_s2cEntropyFiltered)
-
-    # horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
-    _c2sConvsEntropy = dict()
-    for key, conv in flows.c2sInConversations().items():
-        _c2sConvsEntropy[key] = pyitNgramEntropy(conv, n)
-    _s2cConvsEntropy = dict()
-    for key, conv in flows.s2cInConversations().items():
-        _s2cConvsEntropy[key] = pyitNgramEntropy(conv, n)
-    # print('_c2sConvsEntropy')
-    # pprint(_c2sConvsEntropy)
-    # print('_s2cConvsEntropy')
-    # pprint(_s2cConvsEntropy)
-
-    _c2sConvsEntropyFiltered = dict()
-    for key, conv in flows.c2sInConversations().items():
-        # The entropy is too low if the number of specimens is low -> relative to max
-        #  and ignore conversations of length 1 (TODO probably even more? "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
-        if len(conv) <= 1:
-            continue
-        _c2sConvsEntropyFiltered[key] = entropyFilteredOffsets(conv, 1, False)
-    _s2cConvsEntropyFiltered = dict()
-    for key, conv in flows.s2cInConversations().items():
-        # The entropy is too low if the number of specimens is low -> relative to max
-        #  and ignore conversations of length 1 (TODO probably even more? "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
-        if len(conv) <= 1:
-            continue
-        _s2cConvsEntropyFiltered[key] = entropyFilteredOffsets(conv, 1, False)
-    # print('_c2sConvsEntropyFiltered')
-    # pprint(_c2sConvsEntropyFiltered)
-    # print('_s2cConvsEntropyFiltered')
-    # pprint(_s2cConvsEntropyFiltered)
-
-    # req./resp. pairs: search for n-grams with constant values (differing offsets allowed)
-    #
-    # intersection of all c2s and s2c filtered offset lists (per flow)
-    _c2sHorizontalOffsets = set.intersection(*[set(offsetlist) for offsetlist in _c2sConvsEntropyFiltered.values()])
-    _s2cHorizontalOffsets = set.intersection(*[set(offsetlist) for offsetlist in _s2cConvsEntropyFiltered.values()])
-    # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _c2sConvsEntropyFiltered
-    # (TODO use entry for this query specifically?)
-    _c2sCombinedOffsets = _c2sHorizontalOffsets.intersection(_c2sEntropyFiltered)
-    # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _s2cConvsEntropyFiltered
-    # (TODO the entry for this resp specifically?)
-    _s2cCombinedOffsets = _s2cHorizontalOffsets.intersection(_s2cEntropyFiltered)
-    # compute Q->R association
-    mqr = flows.matchQueryRespone()
-    # from the n-gram offsets that passed the entropy-filters determine those that have the same value in mqr pairs
-    valuematch = dict()
-    for query, resp in mqr.items():
-        qrmatchlist = valuematch[(query, resp)] = list()
-        # value in query at any of the offsets in _c2sCombinedOffsets
-        for c2sOffset in _c2sCombinedOffsets:
-            if len(query.data) < c2sOffset + n:
-                continue
-            qvalue = query.data[c2sOffset:c2sOffset + n]
-            # matches a value of resp at any of the offsets in _s2cCombinedOffsets
-            for s2cOffset in _s2cCombinedOffsets:
-                if len(resp.data) < s2cOffset + n:
-                    continue
-                rvalue = resp.data[s2cOffset:s2cOffset + n]
-                if qvalue == rvalue:
-                    qrmatchlist.append((c2sOffset, s2cOffset))
-
-    # measure consistency: offsets recognized in more than transSupportThresh of conversations
-    c2sCandidateCount = Counter()
-    s2cCandidateCount = Counter()
-    for (query, resp), offsetlist in valuematch.items():
-        if len(offsetlist) < 1:
-            continue
-        # transpose to offsets per direction
-        c2sOffsets, s2cOffsets = zip(*offsetlist)
-        c2sCandidateCount.update(set(c2sOffsets))
-        s2cCandidateCount.update(set(s2cOffsets))
-    c2sConsistentCandidates = [offset for offset, cc in c2sCandidateCount.items() if cc > transSupportThresh * len(c2s)]
-    s2cConsistentCandidates = [offset for offset, cc in s2cCandidateCount.items() if cc > transSupportThresh * len(s2c)]
-
-    # merge and filter candidates by minimum length
-    c2sConsistentRanges = [ol for ol in list2ranges(c2sConsistentCandidates) if ol[1] + 1 >= minFieldLength]
-    s2cConsistentRanges = [ol for ol in list2ranges(s2cConsistentCandidates) if ol[1] + 1 >= minFieldLength]
-
-    # TODO place in own class and generate segments
-
-
 
     # TODO Accumulators (FH, Section 3.2.6)
     #   "Accumulators are fields that have increasing values over consecutive message within the same conversation." (FH, Sec. 3.2.6)
