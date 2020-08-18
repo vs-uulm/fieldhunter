@@ -1,6 +1,6 @@
 from collections import Iterator
 from itertools import chain
-from typing import List, Dict, Iterable, Tuple
+from typing import List, Dict, Iterable, Tuple, Union
 
 from numpy import nan
 from pyitlib import discrete_random_variable as drv
@@ -75,7 +75,7 @@ class Flows(object):
     def flows(self):
         return self._flows
 
-    def conversations(self):
+    def conversations(self) -> Dict[Tuple, List[AbstractMessage]]:
         """
         "A conversation is formed of the two flows in opposite direction..." (FH, Footnote 1)
         :return: Dict of conversations with the c2s flow tuple as key.
@@ -83,21 +83,21 @@ class Flows(object):
         return {qkey: self._flows[qkey] + self._flows[rkey]
                 for qkey,rkey in self._dialogs().items() if rkey is not None}
 
-    def c2sInConversations(self):
+    def c2sInConversations(self) -> Dict[Tuple, List[AbstractMessage]]:
         """
         "A conversation is formed of the two flows in opposite direction..." (FH, Footnote 1)
         :return: Dict of c2s messages per conversation with the c2s flow tuple as key.
         """
         return {qkey: self._flows[qkey] for qkey,rkey in self._dialogs().items() if rkey is not None}
 
-    def s2cInConversations(self):
+    def s2cInConversations(self) -> Dict[Tuple, List[AbstractMessage]]:
         """
         "A conversation is formed of the two flows in opposite direction..." (FH, Footnote 1)
         :return: Dict of s2c messages per conversation with the c2s flow tuple as key.
         """
         return {qkey: self._flows[rkey] for qkey,rkey in self._dialogs().items() if rkey is not None}
 
-    def _dialogs(self):
+    def _dialogs(self) -> Dict[Tuple,Union[Tuple,None]]:
         """
         find pairs of flows with src/dst and reversed to each other.
         """
@@ -118,12 +118,14 @@ class Flows(object):
                 dialogs[keytuple] = None
         return dialogs
 
-    def splitDirections(self):
+    def splitDirections(self) -> Tuple[List[AbstractMessage],List[AbstractMessage]]:
         """
         Split list of messages into directions S2C and C2S based on flow information.
         Ignores all flows that have no reverse direction.
 
         FH, Section 2, Footnote 1
+
+        :return Lists of messages, the first is client-to-server, the second is server-to-client
         """
         dialogs = self._dialogs()
         # merge all client flows into one and all server flows into another list of messages
