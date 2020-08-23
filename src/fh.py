@@ -105,109 +105,24 @@ if __name__ == '__main__':
     # # Moreover, Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence.
     # print(HostID.catCorrPosLen(sessionidfields.categoricalCorrelation))
 
-    # # Trans-ID
+    # # Trans-ID (FH, Section 3.2.5)
     # transidfields = TransID(flows)
     # pprint(transidfields.segments)
+
+    # # Accumulators (FH, Section 3.2.6)
+    # accumulatorfields = Accumulator(flows)
+    # pprint(accumulatorfields.segments)
 
     pass
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # # # TODO Working area
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-    # TODO Accumulators (FH, Section 3.2.6)
-    #   "Accumulators are fields that have increasing values over consecutive message within the same conversation." (FH, Sec. 3.2.6)
+    # TODO finalize a "literal" implementation: main script, "set aside" the fieldtypes module
 
-    endianness = 'big'
-    ns = (8, 4, 3, 2)
-    deltaEntropyThresh = 0.8  # Not given in FH, own empirics: 0.2
+    # TODO derive a "improved" implementation: main script, copy/subclass the fieldtypes module and address the todos there
 
-    # c2s and s2c independently
-    c2sConvs = {key: list(sorted(conv, key=lambda m: m.date)) for key,conv in flows.c2sInConversations().items()}
-    s2cConvs = {key: list(sorted(conv, key=lambda m: m.date)) for key,conv in flows.s2cInConversations().items()}
-    c2sdeltas = None
-    s2cdeltas = None
-    c2sDeltaEntropies = dict()
-    s2cDeltaEntropies = dict()
-    for direction in (c2sConvs, s2cConvs):
-        # deltas per offset and n over all message-pairs of all conversations
-        deltas = dict()
-        for key, conv in direction.items():
-            if len(conv) > 2:
-                continue
-            # subsequent messages per direction per conversation
-            for msgA, msgB in zip(conv[:-1], conv[1:]):
-                # iterate n-grams' n = 8, 4, 3, 2
-                # combined from Sec. 3.1.2: n=32, 24, 16 bits (4, 3, 2 bytes)
-                #       and see Sec. 3.2.6: n=64, 32, 16 bits (8, 4, 2 bytes)
-                for n in ns:
-                    if n not in deltas:
-                        deltas[n] = dict()
-                    for offset, (ngramA, ngramB) in enumerate(zip(NgramIterator(msgA, n), NgramIterator(msgB, n))):
-                        # calculate delta between n-grams (n and offset identical) two subsequent messages
-                        # TODO also support little endian
-                        delta = int.from_bytes(ngramB, endianness) - int.from_bytes(ngramA, endianness)
-                        # "compress": ln delta
-                        if offset not in deltas[n]:
-                            deltas[n][offset] = list()
-                        deltas[n][offset].append(delta)  # log(
-        # check: delta positive and fairly constant
-        lndeltas = dict()
-        for n, offdel in deltas.items():
-            lndeltas[n] = dict()
-            for offset, dlts in offdel.items():
-                # require more than 1 value to calculate a meaningful entropy
-                if len(dlts) < 2:
-                    continue
-                npdlts = numpy.array(dlts)
-                # require all deltas to be positive
-                if any(npdlts <= 0):
-                    continue
-                # compress deltas by ln
-                lndeltas[n][offset] = numpy.log(numpy.array(dlts))
-        deltaEntropies = {n: {offset: drv.entropy(dlts)/numpy.log(n*8)
-                              for offset, dlts in offdel.items()} for n, offdel in lndeltas.items()}
-
-        if direction == c2sConvs:
-            c2sdeltas = deltas
-            c2sDeltaEntropies = deltaEntropies
-        if direction == s2cConvs:
-            s2cdeltas = deltas
-            s2cDeltaEntropies = deltaEntropies
-
-    print('c2sDeltaEntropies (n: offset: value)')
-    pprint(c2sDeltaEntropies)
-    # print('s2cDeltaEntropies (n: offset: value)')
-    # pprint(s2cDeltaEntropies)
-
-    # "fairly constant": relatively low entropy -> threshold (value not given in FH)
-    # TODO add s2cDeltaEntropies
-    c2sFilteredDE = {n: {offs: entr for offs, entr in offsdelt.items() if entr < deltaEntropyThresh}
-                     for n, offsdelt in c2sDeltaEntropies.items()}
-    candidates = dict()  # type: Dict[int, List[int]]
-    for n in reversed(sorted(c2sFilteredDE.keys())):
-        # no offsets for ngram size
-        if len(c2sFilteredDE[n]) == 0:
-            continue
-        for offset in sorted(c2sFilteredDE[n].keys()):
-            # precedence for larger ns and smaller offsets: thats those we already found and added to candidates
-            overlapps = False
-            for candN, candOffs in candidates.items():
-                for candO in candOffs:
-                    if ngramIsOverlapping(offset, n, candO, candN):
-                        overlapps = True
-                        break
-                if overlapps:
-                    break
-            if overlapps:
-                continue
-            if not n in candidates:
-                candidates[n] = list()
-            candidates[n].append(offset)
-
-    # create segments from candidates
-    posLen = [(o, n) for n, offsets in candidates.items() for o in offsets]
-
-    
+    # TODO combine inferred fields per message to facilitate validation
 
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # TODO for validation, sub-class nemere.validation.messageParser.ParsingConstantsXXX

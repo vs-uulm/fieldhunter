@@ -48,7 +48,9 @@ class FieldType(ABC):
             mval = Value(message)
             segs4msg = list()
             for start, length in posLen:
-                segs4msg.append(TypedSegment(mval, start, length, cls.typelabel))
+                # check if boundaries fit into message
+                if start + length <= len(mval.values):
+                    segs4msg.append(TypedSegment(mval, start, length, cls.typelabel))
             segments.append(segs4msg)
         return segments
 
@@ -648,4 +650,136 @@ class TransID(FieldType):
         merge and filter candidates by minimum length
         """
         return [ol for ol in list2ranges(consistentCandidates) if ol[1] >= cls.minFieldLength]
+
+
+class Accumulator(FieldType):
+    """
+    Accumulator inference (FH, Section 3.2.6)
+
+    "Accumulators are fields that have increasing values over consecutive message within the same conversation."
+        (FH, Sec. 3.2.6)
+    """
+    typelabel = 'Accumulator'
+
+    endianness = 'big'
+    ns = (8, 4, 3, 2)
+    deltaEntropyThresh = 0.8  # Not given in FH, own empirics: 0.2
+
+    def __init__(self, flows: Flows):
+        super(Accumulator, self).__init__()
+
+        # c2s and s2c independently
+        self._c2sConvs = {key: list(sorted(conv, key=lambda m: m.date))
+                          for key, conv in flows.c2sInConversations().items()}
+        self._c2sDeltas = type(self).deltas(self._c2sConvs)
+        self._c2sDeltaEntropies = type(self).entropies(self._c2sDeltas)
+
+        self._s2cConvs = {key: list(sorted(conv, key=lambda m: m.date))
+                          for key, conv in flows.s2cInConversations().items()}
+        self._s2cDeltas = type(self).deltas(self._c2sConvs)
+        self._s2cDeltaEntropies = type(self).entropies(self._s2cDeltas)
+
+        # print('c2sDeltaEntropies (n: offset: value)')
+        # pprint(c2sDeltaEntropies)
+        # print('s2cDeltaEntropies (n: offset: value)')
+        # pprint(s2cDeltaEntropies)
+
+        c2s, s2c = flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
+        self._segments = self._posLen2segments(c2s, type(self).filter(self._c2sDeltaEntropies)) + \
+                         self._posLen2segments(s2c, type(self).filter(self._s2cDeltaEntropies))
+
+    @classmethod
+    def deltas(cls, conversations: Dict[tuple, List[AbstractMessage]]) -> Dict[int, Dict[int, List[int]]]:
+        """
+        Value deltas per offset and n over all message-pairs of all conversations.
+
+        :param conversations: Conversations need to be sorted in chronological order for the message pairs to produce
+            meaningful deltas.
+        :return: Pairwise deltas of values per offset and n-gram size.
+        """
+        deltas = dict()
+        for key, conv in conversations.items():
+            if len(conv) > 2:
+                continue
+            # subsequent messages per direction per conversation
+            for msgA, msgB in zip(conv[:-1], conv[1:]):
+                # iterate n-grams' n = 8, 4, 3, 2
+                # combined from Sec. 3.1.2: n=32, 24, 16 bits (4, 3, 2 bytes)
+                #       and see Sec. 3.2.6: n=64, 32, 16 bits (8, 4, 2 bytes)
+                for n in cls.ns:
+                    if n not in deltas:
+                        deltas[n] = dict()
+                    for offset, (ngramA, ngramB) in enumerate(zip(NgramIterator(msgA, n), NgramIterator(msgB, n))):
+                        # calculate delta between n-grams (n and offset identical) two subsequent messages
+                        # TODO also support little endian
+                        delta = int.from_bytes(ngramB, cls.endianness) - int.from_bytes(ngramA, cls.endianness)
+                        if offset not in deltas[n]:
+                            deltas[n][offset] = list()
+                        deltas[n][offset].append(delta)
+        return deltas
+
+    @classmethod
+    def entropies(cls, deltas: Dict[int, Dict[int, List[int]]]) -> Dict[int, Dict[int, float]]:
+        """
+        For positive delta values with enough samples to calculate a meaningful entropy (>= 2),
+        calculate the normalized entropies of the "compressed" (ln()) deltas.
+
+        :param deltas: Pairwise deltas between values of subsequent messages in conversations
+            at the same offset and with the same length (n): Dict[n, Dict[offset, delta] ].
+        :return: Entropies of deltas per n-gram length and offset: Dict[n, Dict[offset, entropy] ].
+        """
+        lndeltas = dict()
+        for n, offdel in deltas.items():
+            lndeltas[n] = dict()
+            for offset, dlts in offdel.items():
+                # require more than 1 value to calculate a meaningful entropy
+                if len(dlts) < 2:
+                    continue
+                npdlts = numpy.array(dlts)
+                # require all deltas to be positive
+                if any(npdlts <= 0):
+                    continue
+                # compress deltas by ln
+                lndeltas[n][offset] = numpy.log(numpy.array(dlts))
+        deltaEntropies = {n: {offset: drv.entropy(dlts)/numpy.log(n*8)
+                              for offset, dlts in offdel.items()} for n, offdel in lndeltas.items()}
+        return deltaEntropies
+
+    @classmethod
+    def filter(cls, deltaEntropies: Dict[int, Dict[int, float]]) -> List[Tuple[int, int]]:
+        """
+        Filter the entropies per n-gram size and offset to yield unambiguos candidates for accumulators.
+        Filtering criteria are:
+            * "fairly constant": relatively low entropy
+            * previous filtering left over offsets for a n
+            * prefer larger ns and smaller offsets if candidates are overlapping
+
+        :param deltaEntropies: Entropies of deltas per n-gram length and offset: Dict[n, Dict[offset, entropy] ].
+        :return: List of offsets and lengths that are valid field candidates.
+        """
+        # "fairly constant": relatively low entropy -> threshold (value not given in FH)
+        filteredDE = {n: {offs: entr for offs, entr in offsdelt.items() if entr < cls.deltaEntropyThresh}
+                         for n, offsdelt in deltaEntropies.items()}
+        candidates = dict()  # type: Dict[int, List[int]]
+        for n in reversed(sorted(filteredDE.keys())):
+            # no offsets for this n-gram size
+            if len(filteredDE[n]) == 0:
+                continue
+            for offset in sorted(filteredDE[n].keys()):
+                # precedence for larger ns and smaller offsets: thats those we already found and added to candidates
+                overlapps = False
+                for candN, candOffs in candidates.items():
+                    for candO in candOffs:
+                        if ngramIsOverlapping(offset, n, candO, candN):
+                            overlapps = True
+                            break
+                    if overlapps:
+                        break
+                if overlapps:
+                    continue
+                if not n in candidates:
+                    candidates[n] = list()
+                candidates[n].append(offset)
+        posLen = [(o, n) for n, offsets in candidates.items() for o in offsets]
+        return posLen
 
