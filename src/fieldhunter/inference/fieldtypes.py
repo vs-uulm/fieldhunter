@@ -21,6 +21,8 @@ from nemere.inference.analyzers import Value
 from nemere.inference.segments import TypedSegment
 
 
+
+
 class FieldType(ABC):
     typelabel = None
 
@@ -783,3 +785,7 @@ class Accumulator(FieldType):
         posLen = [(o, n) for n, offsets in candidates.items() for o in offsets]
         return posLen
 
+
+# Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence
+precedence = {MSGtype.typelabel: 0, MSGlen.typelabel: 1, HostID.typelabel: 2,
+                              SessionID.typelabel: 3, TransID.typelabel: 4, Accumulator.typelabel: 5}
