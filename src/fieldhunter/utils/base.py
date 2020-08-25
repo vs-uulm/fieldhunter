@@ -212,13 +212,16 @@ def pyitNgramEntropy(messages: List[AbstractMessage], n=1, endianness='big'):
     return vEntropy
 
 
-def mutualInformationNormalized(qInts: List[List[int]], rInts: List[List[int]]):
+def mutualInformationNormalized(qInts: Union[List[List[int]],List[int]], rInts: Union[List[List[int]],List[int]]):
     """
 
-    :param qInts: List of n-grams as int-list
-    :param rInts: List of n-grams as int-list
+    :param qInts: List of (n-grams as int-list) or one int per realization
+    :param rInts: List of (n-grams as int-list) or one int per realization
     :return:
     """
+    assert len(qInts) > 0, "Entropy requires at least one query realization"
+    assert len(rInts) > 0, "Entropy requires at least one reply realization"
+    assert len(qInts) == len(rInts), "Mutual information requires the same amount of query and reply realizations"
     qEntropy = drv.entropy(qInts)
     if qEntropy != 0:
         return drv.information_mutual(qInts, rInts) / qEntropy

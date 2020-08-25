@@ -1,7 +1,7 @@
 """
 Infer message field types according to the FieldHunter paper Section 3.2
 """
-from typing import List, Tuple, Dict, Iterable
+from typing import List, Tuple, Dict, Iterable, ItemsView, Union
 import random
 from itertools import groupby, product, chain, combinations
 from collections import Counter
@@ -37,7 +37,8 @@ class FieldType(ABC):
         return self._segments
 
     @classmethod
-    def _posLen2segments(cls, messages: List[L2NetworkMessage], posLen: Iterable[Tuple[int, int]]) \
+    def _posLen2segments(cls, messages: List[L2NetworkMessage],
+                         posLen: Union[Iterable[Tuple[int, int]],ItemsView[int, int]]) \
             -> List[List[TypedSegment]]:
         """
         Generate Segments from remaining field ranges.
@@ -110,6 +111,15 @@ class MSGtype(NonConstantNonRandomEntropyFieldType):
 
         # compute Q->R association
         mqr = flows.matchQueryRespone()
+        if len(mqr) < 2:
+            # not enough query response pairs to continue analysis: create valid empty instance state and return
+            self._qrCausality = dict()
+            self._filteredCausality = dict()
+            self._mergingOffsets = list()
+            self._mergedCausality = dict()
+            self._msgtypeRanges = list()
+            self._segments = list()
+            return
         # Mutual information
         self._qrCausality = qrAssociationCorrelation(mqr)
         # filter: only if offset is in c2sEntropyFiltered/s2cEntropyFiltered and the causality is greater than the causalityThresh
@@ -257,6 +267,9 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
             :return: List of messages that contains an equal amount of messages of each length,
                 List of according message lengths
             """
+            if len(self._direction) == 0:  # "No flows in this direction."
+                self._msgmixlen = list()
+                return
             keyfunc = lambda m: len(m.data)
             # Homogeneous Size Collections
             self._msgbylen = {k: list(v) for k, v in groupby(sorted(self._direction, key=keyfunc), keyfunc)}
@@ -516,7 +529,9 @@ class TransID(FieldType):
         self._c2sCombinedOffsets = None
         self._s2cCombinedOffsets = None
         self._valuematch = dict()
+        # noinspection PyTypeChecker
         self._c2sConsistentRanges = None  # type: Iterable[Tuple[int, int]]
+        # noinspection PyTypeChecker
         self._s2cConsistentRanges = None  # type: Iterable[Tuple[int, int]]
 
         # Infer
@@ -636,7 +651,7 @@ class TransID(FieldType):
         """
         c2sCandidateCount = Counter()
         s2cCandidateCount = Counter()
-        for (query, resp), offsetlist in self._valuematch.items():
+        for offsetlist in self._valuematch.values():        # (query, resp), offsetlist
             if len(offsetlist) < 1:
                 continue
             # transpose to offsets per direction
