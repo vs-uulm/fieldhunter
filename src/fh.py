@@ -8,7 +8,6 @@ from os.path import isfile, basename, splitext
 
 # noinspection PyUnresolvedReferences
 from netzob.Model.Vocabulary.Domain.Parser.MessageParser import InvalidParsingPathException
-from tabulate import tabulate
 # noinspection PyUnresolvedReferences
 from pprint import pprint
 # noinspection PyUnresolvedReferences
@@ -45,6 +44,7 @@ if __name__ == '__main__':
 
     specimens = SpecimenLoader(args.pcapfilename, layer=args.layer,
                                relativeToIP = args.relativeToIP)
+    # noinspection PyTypeChecker
     messages = list(specimens.messagePool.keys())  # type: List[L2NetworkMessage]
     flows = Flows(messages)
 
@@ -167,5 +167,7 @@ if __name__ == '__main__':
 
     # interactive
     if args.interactive:
+        # noinspection PyUnresolvedReferences
+        from tabulate import tabulate
         IPython.embed()
 

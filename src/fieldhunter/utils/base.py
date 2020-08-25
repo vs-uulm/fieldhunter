@@ -128,7 +128,6 @@ class Flows(object):
 
         :return Lists of messages, the first is client-to-server, the second is server-to-client
         """
-        dialogs = self._dialogs()
         # merge all client flows into one and all server flows into another list of messages
         c2s = list(chain.from_iterable(self.c2sInConversations().values()))
         s2c = list(chain.from_iterable(self.s2cInConversations().values()))
@@ -140,8 +139,10 @@ class Flows(object):
         for each client-to-server message (query) the server-to-client message (response)
         that has the closest subsequent transmission time.
 
+        >>> from tabulate import tabulate
+        >>> flows = Flows()
         >>> mqr = flows.matchQueryRespone()
-        >>> print(tabulate([(q.date, r.date) for q, r in mqr.items()]))
+        >>> print(tabulate([ (q.date, r.date) for q, r in mqr.items() ]))
         """
         dialogs = self._dialogs()
         qr = dict()
@@ -280,8 +281,6 @@ def verticalByteMerge(mqr: Dict[L4NetworkMessage, L4NetworkMessage], offsets: It
     :param offsets:
     :return:
     """
-    from itertools import compress
-
     sortedOffs = sorted(offsets)
     qMerge = list()
     rMerge = list()
