@@ -136,7 +136,7 @@ class MSGtype(NonConstantNonRandomEntropyFieldType):
         # print("mergingOffsets", mergingOffsets)
         # print("  from offsets", sorted(filteredCausality.keys()))
 
-        # create segments from bytes in mergingOffsets (and TODO compare to dissector/field type)
+        # create segments from bytes in mergingOffsets
         self._msgtypeRanges = list2ranges(self.offsets)
         self._segments = type(self)._posLen2segments(c2s + s2c, self._msgtypeRanges)
 
@@ -593,8 +593,10 @@ class TransID(FieldType):
         # pprint(_s2cConvsEntropyFiltered)
 
         # intersection of all c2s and s2c filtered offset lists (per flow)
-        self._c2sHorizontalOffsets = set.intersection(*[set(offsetlist) for offsetlist in self._c2sConvsEntropyFiltered.values()])
-        self._s2cHorizontalOffsets = set.intersection(*[set(offsetlist) for offsetlist in self._s2cConvsEntropyFiltered.values()])
+        c2sOffsetLists = [set(offsetlist) for offsetlist in self._c2sConvsEntropyFiltered.values()]
+        self._c2sHorizontalOffsets = set.intersection(*c2sOffsetLists) if len(c2sOffsetLists) > 0 else set()
+        s2cOffsetLists = [set(offsetlist) for offsetlist in self._s2cConvsEntropyFiltered.values()]
+        self._s2cHorizontalOffsets = set.intersection(*s2cOffsetLists) if len(s2cOffsetLists) > 0 else set()
         # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _c2sConvsEntropyFiltered
         # (TODO use entry for this query specifically?)
         self._c2sCombinedOffsets = self._c2sHorizontalOffsets.intersection(self._c2sEntropyFiltered)
