@@ -49,23 +49,24 @@ if __name__ == '__main__':
     flows = Flows(messages)
 
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-    infereneStart = time()
+    print("Hunting fields in", trace)
+    inferenceStart = time()
 
-    # # MSG-type
-    print(MSGtype.typelabel)
+    # MSG-type
+    print("Inferring", MSGtype.typelabel)
     msgtypefields = MSGtype(flows)
     # TODO The entropyThresh is not given in FH, so generate some statisics, illustrations,
     #   CDF, histograms, ... using our traces
     # print(tabulate(zip(msgtypefields.c2sEntropy, msgtypefields.s2cEntropy), headers=["c2s", "s2c"], showindex=True))
 
-    # # MSG-len
-    print(MSGlen.typelabel)
+    # MSG-len
+    print("Inferring", MSGlen.typelabel)
     msglenfields = MSGlen(flows)
     # print(tabulate(list(msglenfields.acceptedCandidatesPerDir[0].items()) + ["--"]
     #                + list(msglenfields.acceptedCandidatesPerDir[1].items())))
 
-    # # Host-ID
-    print(HostID.typelabel)
+    # Host-ID
+    print("Inferring", HostID.typelabel)
     hostidfields = HostID(messages)
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # # # # Investigate low categoricalCorrelation for all but one byte within an address field (see NTP and DHCP).
@@ -102,20 +103,20 @@ if __name__ == '__main__':
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # print(HostID.catCorrPosLen(hostidfields.categoricalCorrelation))
 
-    # # Session-ID (FH, Section 3.2.4)
-    print(SessionID.typelabel)
+    # Session-ID (FH, Section 3.2.4)
+    print("Inferring", SessionID.typelabel)
     sessionidfields = SessionID(messages)
     # # Problem similar to Host-ID leads to same bad performance.
     # # Moreover, Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence.
     # print(HostID.catCorrPosLen(sessionidfields.categoricalCorrelation))
 
-    # # Trans-ID (FH, Section 3.2.5)
-    print(TransID.typelabel)
+    # Trans-ID (FH, Section 3.2.5)
+    print("Inferring", TransID.typelabel)
     transidfields = TransID(flows)
     # pprint(transidfields.segments)
 
-    # # Accumulators (FH, Section 3.2.6)
-    print(Accumulator.typelabel)
+    # Accumulators (FH, Section 3.2.6)
+    print("Inferring", Accumulator.typelabel)
     accumulatorfields = Accumulator(flows)
     # pprint(accumulatorfields.segments)
 
@@ -128,7 +129,7 @@ if __name__ == '__main__':
         messages
     )
 
-    inferenceDuration = time() - infereneStart
+    inferenceDuration = time() - inferenceStart
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
     # TODO cherry-pick tshark > v3 required stuff from awdl branch in nemere (bootp -> dhcp)
