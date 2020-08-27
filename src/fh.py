@@ -131,7 +131,6 @@ if __name__ == '__main__':
     inferenceDuration = time() - inferenceStart
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-    # TODO cherry-pick tshark > v3 required stuff from awdl branch in nemere (bootp -> dhcp)
     comparator = MessageComparator(specimens, layer=args.layer, relativeToIP=args.relativeToIP)
     comparator.pprintInterleaved(symbols)
 
@@ -146,10 +145,6 @@ if __name__ == '__main__':
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # # # TODO Working area
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
-    # TODO fix errors from tests with all traces.
-    #   -> seems mostly fixed, but tshark fails, see to-do above
-    #   write a eval-script to iterate all traces for testing.
 
     # TODO introduce doctests to check critical functions
 
