@@ -42,8 +42,7 @@ if __name__ == '__main__':
     # if not exists(reportFolder):
     #    makedirs(reportFolder)
 
-    specimens = SpecimenLoader(args.pcapfilename, layer=args.layer,
-                               relativeToIP = args.relativeToIP)
+    specimens = SpecimenLoader(args.pcapfilename, layer=args.layer, relativeToIP = args.relativeToIP)
     # noinspection PyTypeChecker
     messages = list(specimens.messagePool.keys())  # type: List[L2NetworkMessage]
     flows = Flows(messages)
@@ -133,8 +132,7 @@ if __name__ == '__main__':
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
     # TODO cherry-pick tshark > v3 required stuff from awdl branch in nemere (bootp -> dhcp)
-    comparator = MessageComparator(specimens, layer=args.layer,
-                               relativeToIP=args.relativeToIP)
+    comparator = MessageComparator(specimens, layer=args.layer, relativeToIP=args.relativeToIP)
     comparator.pprintInterleaved(symbols)
 
     # calc FMS per message
