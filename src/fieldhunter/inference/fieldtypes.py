@@ -110,7 +110,7 @@ class MSGtype(NonConstantNonRandomEntropyFieldType):
         # print(tabulate(Counter(msg.data[2:4].hex() for msg in s2c).most_common()))
 
         # compute Q->R association
-        mqr = flows.matchQueryRespone()
+        mqr = flows.matchQueryResponse()
         if len(mqr) < 2:
             # not enough query response pairs to continue analysis: create valid empty instance state and return
             self._qrCausality = dict()
@@ -627,7 +627,7 @@ class TransID(FieldType):
         Output is placed in self._valuematch.
         """
         # compute Q->R association
-        mqr = self._flows.matchQueryRespone()
+        mqr = self._flows.matchQueryResponse()
         # from the n-gram offsets that passed the entropy-filters determine those that have the same value in mqr pairs
         for query, resp in mqr.items():
             qrmatchlist = self._valuematch[(query, resp)] = list()

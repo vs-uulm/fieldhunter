@@ -85,8 +85,48 @@ class NgramIterator(Iterator):
 
 
 class Flows(object):
+    # noinspection PyUnresolvedReferences
     """
     In FH, a flow is defined by the 5-tuple: Layer-4 Protocol, Source IP, Destination IP, Source Port, Destination Port
+    (FH, Section2, Footnote 1)
+
+    >>> from tabulate import tabulate
+    >>> from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
+    >>> from fieldhunter.utils.base import Flows
+    >>> messages = [
+    ...    L4NetworkMessage(b"QQQ456789", l4Protocol="dummy", date=1445405280.01, l3SourceAddress="192.168.23.100", l3DestinationAddress="192.168.23.245", l4SourceAddress=10815, l4DestinationAddress=42),
+    ...    L4NetworkMessage(b"RRR567890", l4Protocol="dummy", date=1445405280.03, l3SourceAddress="192.168.23.245", l3DestinationAddress="192.168.23.100", l4SourceAddress=42, l4DestinationAddress=10815),
+    ...    L4NetworkMessage(b"QQQ7890AB", l4Protocol="dummy", date=1445405280.07, l3SourceAddress="192.168.23.100", l3DestinationAddress="192.168.23.245", l4SourceAddress=10815, l4DestinationAddress=42),
+    ...    L4NetworkMessage(b"RRR567890", l4Protocol="dummy", date=1445405280.05, l3SourceAddress="192.168.23.245", l3DestinationAddress="192.168.23.100", l4SourceAddress=42, l4DestinationAddress=10815),
+    ...    L4NetworkMessage(b"QQQ123456789", l4Protocol="dummy", date=1445405280.11, l3SourceAddress="192.168.23.100", l3DestinationAddress="192.168.23.245", l4SourceAddress=1717, l4DestinationAddress=2323),
+    ...    L4NetworkMessage(b"RRR890A", l4Protocol="dummy", date=1445405280.13, l3SourceAddress="192.168.23.1", l3DestinationAddress="192.168.23.100", l4SourceAddress=2323, l4DestinationAddress=1717),
+    ...    L4NetworkMessage(b"QQQ6789", l4Protocol="dummy", date=1445405280.17, l3SourceAddress="192.168.23.1", l3DestinationAddress="192.168.23.245", l4SourceAddress=1717, l4DestinationAddress=2323),
+    ...    L4NetworkMessage(b"RRR890ABCDEFGH", l4Protocol="dummy", date=1445405280.23, l3SourceAddress="192.168.23.245", l3DestinationAddress="192.168.23.100", l4SourceAddress=2323, l4DestinationAddress=1717)
+    ... ]
+    >>> # for the sake of the test case, the messages RRR890A and QQQ6789 have src IPs that rules them out as
+    >>> #   valid conversations, they should not be contained in the conversion lists below.
+    >>> flows = Flows(messages)
+    >>> mqr = flows.matchQueryResponse()
+    >>> print(tabulate([ (q.date, r.date) for q, r in mqr.items() ], floatfmt=""))
+    -------------  -------------
+    1445405280.01  1445405280.03
+    1445405280.11  1445405280.23
+    -------------  -------------
+    >>> print(tabulate( [(list(flowtuple) + [b" ".join(msg.data for msg in msglst)]) for flowtuple, msglst in flows.conversations().items()] ))
+    -----  --------------  --------------  -----  ----  ---------------------------------------
+    dummy  192.168.23.100  192.168.23.245  10815    42  QQQ456789 QQQ7890AB RRR567890 RRR567890
+    dummy  192.168.23.100  192.168.23.245   1717  2323  QQQ123456789 RRR890ABCDEFGH
+    -----  --------------  --------------  -----  ----  ---------------------------------------
+    >>> print(tabulate( [(list(flowtuple) + [b" ".join(msg.data for msg in msglst)]) for flowtuple, msglst in flows.c2sInConversations().items()] ))
+    -----  --------------  --------------  -----  ----  -------------------
+    dummy  192.168.23.100  192.168.23.245  10815    42  QQQ456789 QQQ7890AB
+    dummy  192.168.23.100  192.168.23.245   1717  2323  QQQ123456789
+    -----  --------------  --------------  -----  ----  -------------------
+    >>> print(tabulate( [(list(flowtuple) + [b" ".join(msg.data for msg in msglst)]) for flowtuple, msglst in flows.s2cInConversations().items()] ))
+    -----  --------------  --------------  -----  ----  -------------------
+    dummy  192.168.23.100  192.168.23.245  10815    42  RRR567890 RRR567890
+    dummy  192.168.23.100  192.168.23.245   1717  2323  RRR890ABCDEFGH
+    -----  --------------  --------------  -----  ----  -------------------
     """
 
     def __init__(self, messages: List[L4NetworkMessage]):
@@ -126,7 +166,7 @@ class Flows(object):
 
     def conversations(self) -> Dict[Tuple, List[AbstractMessage]]:
         """
-        "A conversation is formed of the two flows in opposite direction..." (FH, Footnote 1)
+        "A conversation is formed of the two flows in opposite direction..." (FH, Section2, Footnote 1)
         :return: Dict of conversations with the c2s flow tuple as key.
         """
         return {qkey: self._flows[qkey] + self._flows[rkey]
@@ -134,14 +174,14 @@ class Flows(object):
 
     def c2sInConversations(self) -> Dict[Tuple, List[AbstractMessage]]:
         """
-        "A conversation is formed of the two flows in opposite direction..." (FH, Footnote 1)
+        "A conversation is formed of the two flows in opposite direction..." (FH, Section2, Footnote 1)
         :return: Dict of c2s messages per conversation with the c2s flow tuple as key.
         """
         return {qkey: self._flows[qkey] for qkey,rkey in self._dialogs().items() if rkey is not None}
 
     def s2cInConversations(self) -> Dict[Tuple, List[AbstractMessage]]:
         """
-        "A conversation is formed of the two flows in opposite direction..." (FH, Footnote 1)
+        "A conversation is formed of the two flows in opposite direction..." (FH, Section2, Footnote 1)
         :return: Dict of s2c messages per conversation with the c2s flow tuple as key.
         """
         return {qkey: self._flows[rkey] for qkey,rkey in self._dialogs().items() if rkey is not None}
@@ -181,34 +221,11 @@ class Flows(object):
         s2c = list(chain.from_iterable(self.s2cInConversations().values()))
         return c2s, s2c
 
-    def matchQueryRespone(self):
+    def matchQueryResponse(self):
         """
         Match queries with responses in the flows by identifying
         for each client-to-server message (query) the server-to-client message (response)
         that has the closest subsequent transmission time.
-
-        >>> from tabulate import tabulate
-        >>> from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
-        >>> from fieldhunter.utils.base import Flows
-        >>> messages = [
-        ...    L4NetworkMessage(b"QQQ456789", l4Protocol="dummy", date=1445405280.01, l3SourceAddress="192.168.23.100", l3DestinationAddress="192.168.23.245", l4SourceAddress=10815, l4DestinationAddress=42),
-        ...    L4NetworkMessage(b"RRR567890", l4Protocol="dummy", date=1445405280.03, l3SourceAddress="192.168.23.245", l3DestinationAddress="192.168.23.100", l4SourceAddress=42, l4DestinationAddress=10815),
-        ...    L4NetworkMessage(b"QQQ7890AB", l4Protocol="dummy", date=1445405280.07, l3SourceAddress="192.168.23.100", l3DestinationAddress="192.168.23.245", l4SourceAddress=10815, l4DestinationAddress=42),
-        ...    L4NetworkMessage(b"RRR567890", l4Protocol="dummy", date=1445405280.05, l3SourceAddress="192.168.23.245", l3DestinationAddress="192.168.23.100", l4SourceAddress=42, l4DestinationAddress=10815),
-        ...    L4NetworkMessage(b"QQQ123456789", l4Protocol="dummy", date=1445405280.11, l3SourceAddress="192.168.23.100", l3DestinationAddress="192.168.23.245", l4SourceAddress=1717, l4DestinationAddress=2323),
-        ...    L4NetworkMessage(b"RRR890A", l4Protocol="dummy", date=1445405280.13, l3SourceAddress="192.168.23.1", l3DestinationAddress="192.168.23.100", l4SourceAddress=2323, l4DestinationAddress=1717),
-        ...    L4NetworkMessage(b"QQQ6789", l4Protocol="dummy", date=1445405280.17, l3SourceAddress="192.168.23.1", l3DestinationAddress="192.168.23.245", l4SourceAddress=1717, l4DestinationAddress=2323),
-        ...    L4NetworkMessage(b"RRR890ABCDEFGH", l4Protocol="dummy", date=1445405280.23, l3SourceAddress="192.168.23.245", l3DestinationAddress="192.168.23.100", l4SourceAddress=2323, l4DestinationAddress=1717)
-        ... ]
-        >>> flows = Flows(messages)
-        >>> mqr = flows.matchQueryRespone()
-        >>> # noinspection PyUnresolvedReferences
-        >>> print(tabulate([ (q.date, r.date) for q, r in mqr.items() ], floatfmt=""))
-        -------------  -------------
-        1445405280.01  1445405280.03
-        1445405280.11  1445405280.23
-        -------------  -------------
-
         """
         dialogs = self._dialogs()
         qr = dict()
@@ -255,7 +272,23 @@ def ngramEntropy(messages: List[AbstractMessage], n=1):
     return vEntropy
 
 
-def intsFromNgrams(ngrams: Iterable[bytes], endianness='big'):
+def intsFromNgrams(ngrams: Iterable[bytes], endianness='big') -> List[int]:
+    """
+    Convert an iterable of byte n-grams into a single integer per n-gram.
+    This is useful to simplify working aroung numpy's issue with null-bytes:
+        Issue #3878 (https://github.com/numpy/numpy/issues/3878)
+
+    >>> from fieldhunter.utils.base import intsFromNgrams
+    >>> ngramlist = [b"\x00\x00\x00", b"\x00\x11\x00", b"\xab\x00\x00", b"\xab\x11\x23", b"\x08\x15"]
+    >>> ifn = intsFromNgrams(ngramlist)
+    >>> # noinspection PyUnresolvedReferences
+    >>> [hex(val) for val in ifn]
+    ['0x0', '0x1100', '0xab0000', '0xab1123', '0x815']
+
+    :param ngrams: Iterable of n-grams, one bytes string per n-gram
+    :param endianness: The endianness to use to interpret the bytes.
+    :return: List of integers, one for with the value of each bytes string n-gram.
+    """
     return [int.from_bytes(b, endianness) for b in ngrams]
 
 
@@ -264,17 +297,17 @@ def pyitNgramEntropy(messages: List[AbstractMessage], n=1, endianness='big'):
     The vertical entropies for each offset of all the n-grams at the same offset throughout all messages
     Implementation of entropy calculation from pyitlib. See #entropyVertical
 
+    FH, Section 3.2.1
+
     >>> from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
     >>> from fieldhunter.utils.base import pyitNgramEntropy, ngramEntropy
-    >>> messages = [
+    >>> messageList = [
     ...    L4NetworkMessage(b"QQQ456789"), L4NetworkMessage(b"RRR567890"), L4NetworkMessage(b"QQQ7890AB"),
     ...    L4NetworkMessage(b"RRR567890"), L4NetworkMessage(b"QQQ123456789"), L4NetworkMessage(b"RRR890A"),
     ...    L4NetworkMessage(b"QQQ6789"), L4NetworkMessage(b"RRR890ABCDEFGH")
     ... ]
-    >>> ngramEntropy(messages) == pyitNgramEntropy(messages)
+    >>> ngramEntropy(messages) == pyitNgramEntropy(messageList)
     True
-
-    FH, Section 3.2.1
     """
     ngIters = [NgramIterator(msg, n) for msg in messages]
     vEntropy = list()
@@ -289,6 +322,9 @@ def pyitNgramEntropy(messages: List[AbstractMessage], n=1, endianness='big'):
 
 def mutualInformationNormalized(qInts: Union[List[List[int]],List[int]], rInts: Union[List[List[int]],List[int]]):
     """
+    TODO description from paper
+
+    TODO DocTest
 
     :param qInts: List of (n-grams as int-list) or one int per realization
     :param rInts: List of (n-grams as int-list) or one int per realization
@@ -309,6 +345,9 @@ def qrAssociationCorrelation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1)
     Take the matched query-response pairs (mqr)
     and associate n-gram offsets by mutual information as correlation metric.
 
+    # TODO optimize efficiency by supporting an input filter, i. e.,
+        calculate mutual information only for given ngram offsets
+
     :param mqr: Matched query-response pairs
     :param n: The length of the n-grams to use (in bytes)
     :returns: Offset => causality value
@@ -316,13 +355,13 @@ def qrAssociationCorrelation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1)
     >>> from tabulate import tabulate
     >>> from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
     >>> from fieldhunter.utils.base import qrAssociationCorrelation
-    >>> mqr = {
+    >>> matchedqr = {
     ...    L4NetworkMessage(b"QQQ456789"): L4NetworkMessage(b"RRR567890"),
     ...    L4NetworkMessage(b"QQQ7890AB"): L4NetworkMessage(b"RRR567890"),
     ...    L4NetworkMessage(b"QQQ123456789"): L4NetworkMessage(b"RRR890A"),
     ...    L4NetworkMessage(b"QQQ6789"): L4NetworkMessage(b"RRR890ABCDEFGH"),
     ... }
-    >>> qrAC = qrAssociationCorrelation(mqr)
+    >>> qrAC = qrAssociationCorrelation(matchedqr)
     >>> print(tabulate(qrAC.items()))
     -  -----
     0  nan
@@ -335,10 +374,6 @@ def qrAssociationCorrelation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1)
     -  -----
 
     # TODO ^-- why are the first offsets nans?
-
-    # TODO optimize efficiency by supporting a input filter, i. e.,
-        calculate mutual information only for given ngram offsets
-
     """
     mutInf = dict()
     qIterators, rIterators = list(), list()
@@ -365,9 +400,13 @@ def qrAssociationCorrelation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1)
         # print(rNgrams, "\n")
         qInts = intsFromNgrams(qNgrams)
         rInts = intsFromNgrams(rNgrams)
-        # NgramIterator remembers the offset of its current iteration. This must be the same in both messages.
-        assert qIter.offset == rIter.offset, "The offsets do not match:" \
-                                             f"{qIter.offset} {rIter.offset}\n{qNgrams}\n{rNgrams}"
+        # qIter and rIter are always set here, otherwise the break on (len(qNgrams) == 0 or len(rNgrams) == 0)
+        #   above would have been triggered
+        # noinspection PyUnboundLocalVariable
+        if qIter.offset != rIter.offset:
+            # NgramIterator remembers the offset of its current iteration. This must be the same in both messages.
+            raise RuntimeError("The offsets in qrAssociationCorrelation calculation do not match:"
+                               f"{qIter.offset} {rIter.offset}\n{qNgrams}\n{rNgrams}")
         mutInf[qIter.offset] = mutualInformationNormalized(qInts, rInts)
     return mutInf
 
@@ -376,6 +415,8 @@ def verticalByteMerge(mqr: Dict[L4NetworkMessage, L4NetworkMessage], offsets: It
     """
     Returns two lists of integer-list representations of byte strings, one from all queries and one from all responses,
     containing the bytes at all offsets given as parameter.
+
+    TODO DocTest
 
     :param mqr:
     :param offsets:
@@ -394,6 +435,15 @@ def verticalByteMerge(mqr: Dict[L4NetworkMessage, L4NetworkMessage], offsets: It
 
 
 def iterateSelected(toIter: Iterator, selectors: List[int]):
+    """
+    Only return selected iterations from an iterator.
+
+    TODO DocTest
+
+    :param toIter: The iterator to traverse.
+    :param selectors: The list of iteration indices to return.
+    :return: All iterations in toIter that have an "index" selected by selectors.
+    """
     return (element for offset, element in enumerate(toIter) if offset in selectors)
 
 
@@ -402,8 +452,10 @@ def list2ranges(offsets: List[int]):
     Generate ranges from a list of integer values. The ranges denote the starts and lengths of any subsequence of
     adjacent values, e. g. the list [1,2,3,6,7,20] would result in the ranges [(1,3),(6,2),(20,1)]
 
-    :param offsets:
-    :return:
+    TODO DocTest
+
+    :param offsets: list of integers
+    :return: list of ranges (tuples of offset and length) of consecutive the offsets.
     """
     soffs = sorted(offsets)
     ranges = list()  # type: List[Tuple[int,int]]
@@ -428,6 +480,7 @@ def list2ranges(offsets: List[int]):
 
 def ngramIsOverlapping(o0, n0, o1, n1):
     """
+    Check if two ranges are overlapping. The ranges are defined by offset and length each.
 
     >>> ngramIsOverlapping(2,2,0,3)
     True

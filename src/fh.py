@@ -27,10 +27,11 @@ if __name__ == '__main__':
     parser.add_argument('pcapfilename', help='Filename of the PCAP to load.')
     parser.add_argument('-i', '--interactive', help='open ipython prompt after finishing the analysis.',
                         action="store_true")
+    # TODO remove these options: FH requires TCP/UDP over IP (FH, Section 6.6)
     parser.add_argument('-l', '--layer', type=int, default=2,
                         help='Protocol layer relative to IP to consider. Default is 2 layers above IP '
                              '(typically the payload of a transport protocol).')
-    parser.add_argument('-r', '--relativeToIP', default=False, action='store_true')
+    parser.add_argument('-r', '--relativeToIP', default=True, action='store_true')
     args = parser.parse_args()
 
     if not isfile(args.pcapfilename):
@@ -44,7 +45,7 @@ if __name__ == '__main__':
 
     specimens = SpecimenLoader(args.pcapfilename, layer=args.layer, relativeToIP = args.relativeToIP)
     # noinspection PyTypeChecker
-    messages = list(specimens.messagePool.keys())  # type: List[L2NetworkMessage]
+    messages = list(specimens.messagePool.keys())  # type: List[L4NetworkMessage]
     flows = Flows(messages)
 
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -54,7 +55,7 @@ if __name__ == '__main__':
     # MSG-type
     print("Inferring", MSGtype.typelabel)
     msgtypefields = MSGtype(flows)
-    # TODO The entropyThresh is not given in FH, so generate some statisics, illustrations,
+    # TODO The entropyThresh is not given in FH, so generate some statistics, illustrations,
     #   CDF, histograms, ... using our traces
     # print(tabulate(zip(msgtypefields.c2sEntropy, msgtypefields.s2cEntropy), headers=["c2s", "s2c"], showindex=True))
 
@@ -71,9 +72,9 @@ if __name__ == '__main__':
     # # # # Investigate low categoricalCorrelation for all but one byte within an address field (see NTP and DHCP).
     # # # # According to NTP offset 12 (REF ID, often DST IP address) and DHCP offsets (12, 17, and) 20 (IPs)
     # # # # this works in principle, but if the n-gram is too short the correlation gets lost for some n-grams.
-    # # print(tabulate(zip(*[categoricalCorrelation]), showindex="always"))
+    # # print(tabulate(zip(*[hostidfields.categoricalCorrelation]), showindex="always"))
     # # from matplotlib import pyplot
-    # # pyplot.bar(range(len(categoricalCorrelation)), categoricalCorrelation)
+    # # pyplot.bar(range(len(hostidfields.categoricalCorrelation)), hostidfields.categoricalCorrelation)
     # # pyplot.show()
     # # # sum([msg.data[20:24] == bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
     # # # sum([int.from_bytes(messages[m].data[20:24], "big") == srcs[m] for m in range(len(messages))])
@@ -97,8 +98,8 @@ if __name__ == '__main__':
     # # for serverSrcPairs in [nsp, nsp0, nsp1, nsp2, nsp3]:
     # #     print(drv.information_mutual(serverSrcPairs[:, 0], serverSrcPairs[:, 1]) / drv.entropy_joint(serverSrcPairs.T))
     # # # # TODO This is no implementation error, but raises doubts about the Host-ID description completeness:
-    # # # #  Probably it does not mention a Entropy filter, direction separation, or - most probably -
-    # # # #  an iterative n-gram size
+    # # # #  Probably it does not mention an Entropy filter, direction separation, or - most probably -
+    # # # #  an iterative n-gram size increase/decrease.
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # print(HostID.catCorrPosLen(hostidfields.categoricalCorrelation))
 
@@ -132,7 +133,8 @@ if __name__ == '__main__':
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
     comparator = MessageComparator(specimens, layer=args.layer, relativeToIP=args.relativeToIP)
-    comparator.pprintInterleaved(symbols)
+    # TODO fix required: for some reason, this takes really long (also true for the FMS calculation)
+    # comparator.pprintInterleaved(symbols)
 
     # calc FMS per message
     print("Calculate FMS...")
