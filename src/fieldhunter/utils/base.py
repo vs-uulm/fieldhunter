@@ -2,11 +2,11 @@ from collections import Iterator
 from itertools import chain
 from typing import List, Dict, Iterable, Tuple, Union
 
-from netzob.Model.Vocabulary.Messages.L2NetworkMessage import L2NetworkMessage
 from numpy import nan
 from pyitlib import discrete_random_variable as drv
 
 from netzob.Model.Vocabulary.Messages.AbstractMessage import AbstractMessage
+from netzob.Model.Vocabulary.Messages.L2NetworkMessage import L2NetworkMessage
 from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
 
 from nemere.inference.segments import MessageAnalyzer
@@ -46,20 +46,28 @@ class NgramIterator(Iterator):
 
 class Flows(object):
     """
-    In FH, a flow is defined by the 5-tuple: Layer-4 Protocol, Source IP, Source Port, Destination IP, Destination IP
+    In FH, a flow is defined by the 5-tuple: Layer-4 Protocol, Source IP, Destination IP, Source Port, Destination Port
     """
 
-    def __init__(self, messages: List[L2NetworkMessage]):
+    def __init__(self, messages: List[L4NetworkMessage]):
         self._messages = messages
         self._flows = self._identify()
 
-    def _identify(self):
+    def _identify(self) -> Dict[Tuple, List[L4NetworkMessage]]:
         """
-        identify flows
+        Identify flows.
+
+        :return A dict mapping the 5-tuple
+            (Layer-4 Protocol, Source IP, Destination IP, Source Port, Destination Port)
+            to the list of addresses in the flow denoted by the 5-tuple.
         """
-        flows = dict()  # type: Dict[Tuple, List[L2NetworkMessage]]
+        flows = dict()  # type: Dict[Tuple[str,str,str,str,str], List[L4NetworkMessage]]
         # client is initiator, sort by packet date
-        for msg in sorted(self._messages, key=lambda m: m.date):
+        for msg in sorted(self._messages, key=lambda m: m.date):  # type: L4NetworkMessage
+            if not isinstance(msg, L4NetworkMessage):
+                raise TypeError("To identify flows, all messages need to be from a known encapsulation with known "
+                                "network and transport layer protocols. No flow determined for "
+                                f"{type(msg).__name__}:\n{msg}")
             src = msg.source.rpartition(':')
             dst = msg.destination.rpartition(':')
             srcAddress = src[0]
