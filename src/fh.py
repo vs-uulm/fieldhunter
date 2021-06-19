@@ -70,7 +70,7 @@ if __name__ == '__main__':
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # # # # Investigate low categoricalCorrelation for all but one byte within an address field (see NTP and DHCP).
     # # # # According to NTP offset 12 (REF ID, often DST IP address) and DHCP offsets (12, 17, and) 20 (IPs)
-    # # # # this works in principle, but if the n-gram is too short the correlation gets lost some n-grams.
+    # # # # this works in principle, but if the n-gram is too short the correlation gets lost for some n-grams.
     # # print(tabulate(zip(*[categoricalCorrelation]), showindex="always"))
     # # from matplotlib import pyplot
     # # pyplot.bar(range(len(categoricalCorrelation)), categoricalCorrelation)

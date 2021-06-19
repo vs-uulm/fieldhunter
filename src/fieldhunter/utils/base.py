@@ -2,11 +2,11 @@ from collections import Iterator
 from itertools import chain
 from typing import List, Dict, Iterable, Tuple, Union
 
+import IPython
 from numpy import nan
 from pyitlib import discrete_random_variable as drv
 
 from netzob.Model.Vocabulary.Messages.AbstractMessage import AbstractMessage
-from netzob.Model.Vocabulary.Messages.L2NetworkMessage import L2NetworkMessage
 from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
 
 from nemere.inference.segments import MessageAnalyzer
@@ -18,30 +18,70 @@ class NgramIterator(Iterator):
     Iterate over the byte n-grams in message.
 
     FH, Section 3.1.2
+
+
+    >>> from fieldhunter.utils.base import NgramIterator
+    >>> from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
+    >>> ngi = NgramIterator(L4NetworkMessage(b"QQQ456789"))
+    >>> for ngram in ngi:
+    ...     print(ngram, ngi.offset, ngi.exhausted, ngi.lookahead)
+    b'QQQ' 0 False True
+    b'QQ4' 1 False True
+    b'Q45' 2 False True
+    b'456' 3 False True
+    b'567' 4 False True
+    b'678' 5 False True
+    b'789' 6 False False
+    >>> print(ngi.exhausted, ngi.lookahead)
+    True False
     """
 
     def __init__(self, message: AbstractMessage, n=3):
+        """
+
+        :param message: The message of which to iterate the n-grams.
+        :param n: The n in n-gram (length of chunk in bytes).
+        """
+        if not isinstance(message, AbstractMessage):
+            raise ValueError("Parameter needs to be a Netzob message object (AbstractMessage).")
         self._message = message
         self._n = n
         self.__offset = -1
+
+    __step = 1
 
     def __iter__(self):
         self.__offset = -1
         return self
 
     def __next__(self) -> bytes:
-        self.__offset += 1
-        if self.__offset > len(self._message.data) - self._n:
+        self.__offset += NgramIterator.__step
+        if self.exhausted:
             raise StopIteration()
         return self._message.data[self.__offset:self.__offset+self._n]
 
     @property
     def offset(self):
+        """
+        NgramIterator enumerates the offset of the n-gram its current iteration is taken from.
+
+        :return: offset of the n-gram in the current iteration.
+        """
         return self.__offset
 
     @property
     def exhausted(self):
+        """
+        :return: Indicates that the last iteration has occurred.
+        """
         return self.__offset > len(self._message.data) - self._n
+
+    @property
+    def lookahead(self):
+        """
+        :return: True indicates that at least one more iteration is contained in this iterator.
+        """
+        return self.__offset + NgramIterator.__step <= len(self._message.data) - self._n
 
 
 class Flows(object):
@@ -148,10 +188,27 @@ class Flows(object):
         that has the closest subsequent transmission time.
 
         >>> from tabulate import tabulate
-        >>> flows = Flows()
+        >>> from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
+        >>> from fieldhunter.utils.base import Flows
+        >>> messages = [
+        ...    L4NetworkMessage(b"QQQ456789", l4Protocol="dummy", date=1445405280.01, l3SourceAddress="192.168.23.100", l3DestinationAddress="192.168.23.245", l4SourceAddress=10815, l4DestinationAddress=42),
+        ...    L4NetworkMessage(b"RRR567890", l4Protocol="dummy", date=1445405280.03, l3SourceAddress="192.168.23.245", l3DestinationAddress="192.168.23.100", l4SourceAddress=42, l4DestinationAddress=10815),
+        ...    L4NetworkMessage(b"QQQ7890AB", l4Protocol="dummy", date=1445405280.07, l3SourceAddress="192.168.23.100", l3DestinationAddress="192.168.23.245", l4SourceAddress=10815, l4DestinationAddress=42),
+        ...    L4NetworkMessage(b"RRR567890", l4Protocol="dummy", date=1445405280.05, l3SourceAddress="192.168.23.245", l3DestinationAddress="192.168.23.100", l4SourceAddress=42, l4DestinationAddress=10815),
+        ...    L4NetworkMessage(b"QQQ123456789", l4Protocol="dummy", date=1445405280.11, l3SourceAddress="192.168.23.100", l3DestinationAddress="192.168.23.245", l4SourceAddress=1717, l4DestinationAddress=2323),
+        ...    L4NetworkMessage(b"RRR890A", l4Protocol="dummy", date=1445405280.13, l3SourceAddress="192.168.23.1", l3DestinationAddress="192.168.23.100", l4SourceAddress=2323, l4DestinationAddress=1717),
+        ...    L4NetworkMessage(b"QQQ6789", l4Protocol="dummy", date=1445405280.17, l3SourceAddress="192.168.23.1", l3DestinationAddress="192.168.23.245", l4SourceAddress=1717, l4DestinationAddress=2323),
+        ...    L4NetworkMessage(b"RRR890ABCDEFGH", l4Protocol="dummy", date=1445405280.23, l3SourceAddress="192.168.23.245", l3DestinationAddress="192.168.23.100", l4SourceAddress=2323, l4DestinationAddress=1717)
+        ... ]
+        >>> flows = Flows(messages)
         >>> mqr = flows.matchQueryRespone()
         >>> # noinspection PyUnresolvedReferences
-        >>> print(tabulate([ (q.date, r.date) for q, r in mqr.items() ]))
+        >>> print(tabulate([ (q.date, r.date) for q, r in mqr.items() ], floatfmt=""))
+        -------------  -------------
+        1445405280.01  1445405280.03
+        1445405280.11  1445405280.23
+        -------------  -------------
+
         """
         dialogs = self._dialogs()
         qr = dict()
@@ -207,7 +264,15 @@ def pyitNgramEntropy(messages: List[AbstractMessage], n=1, endianness='big'):
     The vertical entropies for each offset of all the n-grams at the same offset throughout all messages
     Implementation of entropy calculation from pyitlib. See #entropyVertical
 
+    >>> from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
+    >>> from fieldhunter.utils.base import pyitNgramEntropy, ngramEntropy
+    >>> messages = [
+    ...    L4NetworkMessage(b"QQQ456789"), L4NetworkMessage(b"RRR567890"), L4NetworkMessage(b"QQQ7890AB"),
+    ...    L4NetworkMessage(b"RRR567890"), L4NetworkMessage(b"QQQ123456789"), L4NetworkMessage(b"RRR890A"),
+    ...    L4NetworkMessage(b"QQQ6789"), L4NetworkMessage(b"RRR890ABCDEFGH")
+    ... ]
     >>> ngramEntropy(messages) == pyitNgramEntropy(messages)
+    True
 
     FH, Section 3.2.1
     """
@@ -241,15 +306,39 @@ def mutualInformationNormalized(qInts: Union[List[List[int]],List[int]], rInts: 
 
 def qrAssociationCorrelation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1):
     """
-    Take the matched query-response pairs (mqr) and associate ngram offsets by mutual information as correlation
-    metric.
-
-    # TODO optimize efficiency by supporting a input filter, i. e.,
-        calculate mutual information only for given ngram offsets
+    Take the matched query-response pairs (mqr)
+    and associate n-gram offsets by mutual information as correlation metric.
 
     :param mqr: Matched query-response pairs
     :param n: The length of the n-grams to use (in bytes)
     :returns: Offset => causality value
+
+    >>> from tabulate import tabulate
+    >>> from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
+    >>> from fieldhunter.utils.base import qrAssociationCorrelation
+    >>> mqr = {
+    ...    L4NetworkMessage(b"QQQ456789"): L4NetworkMessage(b"RRR567890"),
+    ...    L4NetworkMessage(b"QQQ7890AB"): L4NetworkMessage(b"RRR567890"),
+    ...    L4NetworkMessage(b"QQQ123456789"): L4NetworkMessage(b"RRR890A"),
+    ...    L4NetworkMessage(b"QQQ6789"): L4NetworkMessage(b"RRR890ABCDEFGH"),
+    ... }
+    >>> qrAC = qrAssociationCorrelation(mqr)
+    >>> print(tabulate(qrAC.items()))
+    -  -----
+    0  nan
+    1  nan
+    2  nan
+    3    0.5
+    4    0.5
+    5    0.5
+    6    0
+    -  -----
+
+    # TODO ^-- why are the first offsets nans?
+
+    # TODO optimize efficiency by supporting a input filter, i. e.,
+        calculate mutual information only for given ngram offsets
+
     """
     mutInf = dict()
     qIterators, rIterators = list(), list()
@@ -259,16 +348,15 @@ def qrAssociationCorrelation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1)
     while not all(qiter.exhausted for qiter in qIterators) or all(riter.exhausted for riter in rIterators):
         qNgrams = list()
         rNgrams = list()
-        # get two lists of ngrams with the same offset, one for queries, one for responses
+        # get two lists of n-grams with the same offset, one for queries, one for responses
         for qIter, rIter in zip(qIterators, rIterators):
-            try:
-                qNgram = next(qIter)
-                rNgram = next(rIter)
-            except StopIteration:
-                # there are no more ngrams for query or response for this pair of Q/R messages
+            if not qIter.lookahead or not rIter.lookahead:
+                # there are no more n-grams for either query or response for this pair of Q/R messages
                 continue
-            qNgrams.append(qNgram)
-            rNgrams.append(rNgram)
+            # fetch the next iteration for both messages in parallel.
+            # A StopIteration should never occur here, since we check if the iterators are soon being exhausted before.
+            qNgrams.append(next(qIter))
+            rNgrams.append(next(rIter))
             # print("Q offset:", qIter.offset)  # should be the same for all iterators in one while loop
             # print("R offset:", rIter.offset, "\n")
         if len(qNgrams) == 0 or len(rNgrams) == 0:
@@ -277,6 +365,9 @@ def qrAssociationCorrelation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1)
         # print(rNgrams, "\n")
         qInts = intsFromNgrams(qNgrams)
         rInts = intsFromNgrams(rNgrams)
+        # NgramIterator remembers the offset of its current iteration. This must be the same in both messages.
+        assert qIter.offset == rIter.offset, "The offsets do not match:" \
+                                             f"{qIter.offset} {rIter.offset}\n{qNgrams}\n{rNgrams}"
         mutInf[qIter.offset] = mutualInformationNormalized(qInts, rInts)
     return mutInf
 
