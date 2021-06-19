@@ -142,6 +142,7 @@ class Flows(object):
         >>> from tabulate import tabulate
         >>> flows = Flows()
         >>> mqr = flows.matchQueryRespone()
+        >>> # noinspection PyUnresolvedReferences
         >>> print(tabulate([ (q.date, r.date) for q, r in mqr.items() ]))
         """
         dialogs = self._dialogs()

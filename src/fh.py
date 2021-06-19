@@ -15,7 +15,7 @@ import IPython
 
 from nemere.utils.loader import SpecimenLoader
 from nemere.validation.dissectorMatcher import MessageComparator, DissectorMatcher
-from nemere.validation.reportWriter import writeReport
+from nemere.utils.reportWriter import writeReport
 from fieldhunter.inference.fieldtypes import *
 from fieldhunter.inference.common import segmentedMessagesAndSymbols
 from fieldhunter.utils.base import Flows

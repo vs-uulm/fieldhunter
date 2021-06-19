@@ -437,7 +437,8 @@ class CategoricalCorrelatedField(FieldType,ABC):
 
     @property
     def categoricalCorrelation(self):
-        # Attribute needs to be defined in subclass init.
+        # !! Attribute needs to be defined in subclass init !!
+        # noinspection PyUnresolvedReferences
         return self._categoricalCorrelation
 
 
