@@ -1,2 +1,8 @@
 __pycache__
+reports/
+workspace.xml
+usage.statistics.xml
+shelf/
+*.iml
+gradle.xml
 

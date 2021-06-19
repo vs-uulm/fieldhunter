@@ -5,10 +5,13 @@
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lib" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/sub" />
+      <excludeFolder url="file://$MODULE_DIR$/input" />
+      <excludeFolder url="file://$MODULE_DIR$/reports" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.8 (fh)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.7 (reup)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="module" module-name="nemesys" />
+    <orderEntry type="module" module-name="netzob" />
   </component>
   <component name="PackageRequirementsSettings">
     <option name="requirementsPath" value="" />

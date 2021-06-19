@@ -4,6 +4,7 @@
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/fieldhunter.iml" filepath="$PROJECT_DIR$/.idea/fieldhunter.iml" />
       <module fileurl="file://$PROJECT_DIR$/../nemesys/.idea/nemesys.iml" filepath="$PROJECT_DIR$/../nemesys/.idea/nemesys.iml" />
+      <module fileurl="file://$USER_HOME$/REUP-common/Tools/netzob-official/netzob/src/netzob/.idea/netzob.iml" filepath="$USER_HOME$/REUP-common/Tools/netzob-official/netzob/src/netzob/.idea/netzob.iml" />
     </modules>
   </component>
 </project>
