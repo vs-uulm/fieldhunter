@@ -14,7 +14,7 @@ if __name__ == '__main__':
     parser = ArgumentParser(
         description='Statistics about the given PCAP trace that have impact on the FieldHunter inference.')
     parser.add_argument('pcapfilename', help='Filename of the PCAP to load.')
-    parser.add_argument('-i', '--interactive', help='open ipython prompt after finishing the analysis.',
+    parser.add_argument('-i', '--interactive', help='open IPython prompt after finishing the analysis.',
                         action="store_true")
     args = parser.parse_args()
 
@@ -28,27 +28,28 @@ if __name__ == '__main__':
     specimens = SpecimenLoader(args.pcapfilename, layer=2, relativeToIP=True)
     # noinspection PyTypeChecker
     messages = list(specimens.messagePool.keys())  # type: List[L4NetworkMessage]
-    flows = Flows(messages)
 
+    # # # # # # # # # # # # # # # # # #
+    # Relevant for MSG-Type
+    flows = Flows(messages)
     print(tabulate(flows.c2sInConversations().keys()))
     print(tabulate(flows.s2cInConversations().keys()))
     print(tabulate(flows.conversations().keys()))
     mqr = flows.matchQueryResponse()
     print("Number of matches queries and responses:", len(mqr), "in", len(flows.flows), "flows")
     print("Found in", len(messages), "messages. Coverage:", (len(mqr)*200)/len(messages), "%")
+    #
+    # TODO amount/percentage of messages in the trace that are of singular flows,
+    #   i. e. without a matching request or reply
+    #   discern types: broadcasts, c2s/s2c without matching flow
+    #
+    # Entropy filter threshold rationale -> e. g. some histogram, CDF, ...
+    # # # # # # # # # # # # # # # # # #
 
 
-
-# Relevant for MSG-Type
-# TODO amount/percentage of messages in the trace that are of singular flows,
-#   i. e. without a matching request or reply
-#   discern types: broadcasts, c2s/s2c without matching flow
-#
-# Entropy filter threshold rationale -> e. g. some histogram, CDF, ...
-#
-
-
-# Relevant for MSG-Len
-# TODO length of messages, something like:
-#         keyfunc = lambda m: len(m.data)
-#         msgbylen = {k: v for k, v in groupby(sorted(direction, key=keyfunc), keyfunc)}
+    # # # # # # # # # # # # # # # # # #
+    # Relevant for MSG-Len
+    # TODO length of messages, something like:
+    #         keyfunc = lambda m: len(m.data)
+    #         msgbylen = {k: v for k, v in groupby(sorted(direction, key=keyfunc), keyfunc)}
+    # # # # # # # # # # # # # # # # # #

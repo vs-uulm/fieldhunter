@@ -81,8 +81,12 @@ class NonConstantNonRandomEntropyFieldType(FieldType, ABC):
 class MSGtype(NonConstantNonRandomEntropyFieldType):
     """
     Message type (MSG-Type) inference (FH, Section 3.2.1, Fig. 3 left).
+    This type heuristic is based on the mutual information shared between n-grams at the same offset in the query and
+    response messages. This assumes that message type fields are at the same position in query and response. Moreover,
+    fields that solely denote whether a message is a query or a response, yield a undefined mutual information and thus
+    cannot be detected as fields denoting a message type.
 
-    Properties enable access to intermediate and final results.
+    The properties of this class provide access to intermediate and final results.
     """
     typelabel = "MSG-Type"
     causalityThresh = 0.6  # FH, Sec. 3.2.1 says 0.8, but that leaves no candidates for our traces

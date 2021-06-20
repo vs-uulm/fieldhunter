@@ -273,7 +273,7 @@ def ngramEntropy(messages: List[AbstractMessage], n=1):
 
 
 def intsFromNgrams(ngrams: Iterable[bytes], endianness='big') -> List[int]:
-    """
+    r"""
     Convert an iterable of byte n-grams into a single integer per n-gram.
     This is useful to simplify working aroung numpy's issue with null-bytes:
         Issue #3878 (https://github.com/numpy/numpy/issues/3878)
@@ -306,7 +306,7 @@ def pyitNgramEntropy(messages: List[AbstractMessage], n=1, endianness='big'):
     ...    L4NetworkMessage(b"RRR567890"), L4NetworkMessage(b"QQQ123456789"), L4NetworkMessage(b"RRR890A"),
     ...    L4NetworkMessage(b"QQQ6789"), L4NetworkMessage(b"RRR890ABCDEFGH")
     ... ]
-    >>> ngramEntropy(messages) == pyitNgramEntropy(messageList)
+    >>> ngramEntropy(messageList) == pyitNgramEntropy(messageList)
     True
     """
     ngIters = [NgramIterator(msg, n) for msg in messages]
@@ -322,9 +322,26 @@ def pyitNgramEntropy(messages: List[AbstractMessage], n=1, endianness='big'):
 
 def mutualInformationNormalized(qInts: Union[List[List[int]],List[int]], rInts: Union[List[List[int]],List[int]]):
     """
-    TODO description from paper
+    Calculate the Mutual Information between two lists of n-grams, e.g.,
+        one list being queries and the other the according responses, normalized to the queries' entropy.
+    Mutual information measures the information shared between the two lists. (FH, Section 3.2.1)
 
-    TODO DocTest
+    >>> from fieldhunter.utils.base import mutualInformationNormalized, intsFromNgrams
+    >>> queryNgramsConst = [b'QQQ', b'QQQ', b'QQQ', b'QQQ']
+    >>> respoNgramsConst = [b'RRR', b'RRR', b'RRR', b'RRR']
+    >>> queryNgramsCorr = [b'42', b'40', b'42', b'23', b'17']
+    >>> respoNgramsCorr = [b'24', b'04', b'24', b'32', b'71']
+    >>> queryNgramsPart = [b'42', b'40', b'42', b'23', b'17']
+    >>> respoNgramsPart = [b'04', b'04', b'04', b'32', b'71']
+    >>> # query and response n-grams are always constant: This allows no conclusion about any correlation => nan
+    >>> mutualInformationNormalized(intsFromNgrams(queryNgramsConst), intsFromNgrams(respoNgramsConst))
+    nan
+    >>> # query and response n-grams always have corresponding values => perfectly correlated
+    >>> mutualInformationNormalized(intsFromNgrams(queryNgramsCorr), intsFromNgrams(respoNgramsCorr))
+    1.0
+    >>> # some query and response n-grams have corresponding values, multiple other queries have the same responses.
+    >>> mutualInformationNormalized(intsFromNgrams(queryNgramsPart), intsFromNgrams(respoNgramsPart))
+    0.7133...
 
     :param qInts: List of (n-grams as int-list) or one int per realization
     :param rInts: List of (n-grams as int-list) or one int per realization
@@ -344,13 +361,6 @@ def qrAssociationCorrelation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1)
     """
     Take the matched query-response pairs (mqr)
     and associate n-gram offsets by mutual information as correlation metric.
-
-    # TODO optimize efficiency by supporting an input filter, i. e.,
-        calculate mutual information only for given ngram offsets
-
-    :param mqr: Matched query-response pairs
-    :param n: The length of the n-grams to use (in bytes)
-    :returns: Offset => causality value
 
     >>> from tabulate import tabulate
     >>> from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
@@ -373,7 +383,14 @@ def qrAssociationCorrelation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1)
     6    0
     -  -----
 
-    # TODO ^-- why are the first offsets nans?
+    For the first 3 bytes the normalized mutual information is undefined: see #mutualInformationNormalized()
+
+    # TODO optimize efficiency by supporting an input filter, i. e.,
+        calculate mutual information only for given ngram offsets
+
+    :param mqr: Matched query-response pairs
+    :param n: The length of the n-grams to use (in bytes)
+    :returns: Offset => causality value
     """
     mutInf = dict()
     qIterators, rIterators = list(), list()
@@ -412,15 +429,37 @@ def qrAssociationCorrelation(mqr: Dict[L4NetworkMessage, L4NetworkMessage], n=1)
 
 
 def verticalByteMerge(mqr: Dict[L4NetworkMessage, L4NetworkMessage], offsets: Iterable[int]):
+    # noinspection PyUnresolvedReferences
     """
-    Returns two lists of integer-list representations of byte strings, one from all queries and one from all responses,
+    Returns two lists of integer-list representations of byte strings,
+    one from all queries and one from all responses,
     containing the bytes at all offsets given as parameter.
 
-    TODO DocTest
+    >>> from fieldhunter.utils.base import verticalByteMerge
+    >>> messageMap = {
+    ...    L4NetworkMessage(b"QQQ456789"): L4NetworkMessage(b"RRR567890"),
+    ...    L4NetworkMessage(b"QQQ7890AB"): L4NetworkMessage(b"RRR567890"),
+    ...    L4NetworkMessage(b"QQQ123456789"): L4NetworkMessage(b"RRR890A"),
+    ...    L4NetworkMessage(b"QQQ6789"): L4NetworkMessage(b"RRR890ABCDEFGH"),
+    ... }
+    >>> verticalByteMerge(messageMap, [1])
+    ([81, 81, 81, 81], [82, 82, 82, 82])
+    >>> verticalByteMerge(messageMap, [1,2,3])
+    ([5329204, 5329207, 5329201, 5329206], [5394997, 5394997, 5395000, 5395000])
+    >>> qMsgs, rMsgs = verticalByteMerge(messageMap, [3,5,6])
+    >>> # ints converted back to the bytes number 3, 5, and 6 from the keys in messageMap
+    >>> [int.to_bytes(val, 3, 'big') for val in qMsgs]
+    [b'467', b'790', b'134', b'689']
+    >>> # ints converted back to the bytes number 3, 5, and 6 from the values in messageMap
+    >>> [int.to_bytes(val, 3, 'big') for val in rMsgs]
+    [b'578', b'578', b'80A', b'80A']
 
-    :param mqr:
-    :param offsets:
-    :return:
+    :param mqr: Dict that maps one message to another.
+    :param offsets: List of offsets for which the byte values should be returned.
+        The offset must exist in all messages.
+    :return: Two lists of integer representations of the byte values at the given offsets,
+        one list for the keys and one for the values of the input dict.
+    :raises IndexError: If an offset does not exist in any message.
     """
     sortedOffs = sorted(offsets)
     qMerge = list()
@@ -430,7 +469,6 @@ def verticalByteMerge(mqr: Dict[L4NetworkMessage, L4NetworkMessage], offsets: It
         #   (https://github.com/numpy/numpy/issues/3878)
         qMerge.append(int.from_bytes(bytes(query.data[o] for o in sortedOffs), 'big'))
         rMerge.append(int.from_bytes(bytes(resp.data[o] for o in sortedOffs), 'big'))
-
     return qMerge, rMerge
 
 
@@ -438,11 +476,22 @@ def iterateSelected(toIter: Iterator, selectors: List[int]):
     """
     Only return selected iterations from an iterator.
 
-    TODO DocTest
+    >>> from fieldhunter.utils.base import iterateSelected
+    >>> bytesTuple = iter((b'QQQ456789', b'RRR567890', b'QQQ7890AB', b'RRR567890', b'QQQ123456789', b'RRR890A'))
+    >>> bt2357 = iterateSelected(bytesTuple, [2,3,5,7])
+    >>> next(bt2357)
+    b'QQQ7890AB'
+    >>> next(bt2357)
+    b'RRR567890'
+    >>> next(bt2357)
+    b'RRR890A'
+    >>> next(bt2357)  # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+    StopIteration
 
     :param toIter: The iterator to traverse.
     :param selectors: The list of iteration indices to return.
-    :return: All iterations in toIter that have an "index" selected by selectors.
+    :return: A generator for all iterations in toIter that have an "index" selected by selectors.
     """
     return (element for offset, element in enumerate(toIter) if offset in selectors)
 
@@ -452,27 +501,41 @@ def list2ranges(offsets: List[int]):
     Generate ranges from a list of integer values. The ranges denote the starts and lengths of any subsequence of
     adjacent values, e. g. the list [1,2,3,6,7,20] would result in the ranges [(1,3),(6,2),(20,1)]
 
-    TODO DocTest
+    >>> from fieldhunter.utils.base import list2ranges
+    >>> list2ranges([1,2,3,6,7,20])
+    [(1, 3), (6, 2), (20, 1)]
+    >>> list2ranges([2,3,6,11,12,13,23,24,25,26])
+    [(2, 2), (6, 1), (11, 3), (23, 4)]
+    >>> list2ranges([2])
+    [(2, 1)]
+    >>> list2ranges([])
+    []
+    >>> list2ranges([-2])  # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+    ValueError: Offsets must be positive numbers.
 
     :param offsets: list of integers
     :return: list of ranges (tuples of offset and length) of consecutive the offsets.
     """
     soffs = sorted(offsets)
     ranges = list()  # type: List[Tuple[int,int]]
+    # offsets empty
     if len(soffs) == 0:
         return ranges
-    else:
-        assert soffs[0] >= 0, "Offsets must be positive numbers."
-    if len(soffs) <= 1:
-        return [(soffs[0],soffs[0])]
+    if soffs[0] < 0:
+        raise ValueError("Offsets must be positive numbers.")
+    # only one offset
+    if len(soffs) == 1:
+        return [(soffs[0],1)]
     start = soffs[0]
     last = soffs[0]
     for offs in soffs[1:]:
         if offs > last + 1:
-            ranges.append((start,last))
+            ranges.append((start, last - start + 1))
             # start a new range
             start = offs
         last = offs
+    # append dangling start/last
     ranges.append((start, last - start + 1))
 
     return ranges

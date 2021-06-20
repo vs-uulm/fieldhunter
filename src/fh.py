@@ -134,7 +134,7 @@ if __name__ == '__main__':
 
     comparator = MessageComparator(specimens, layer=args.layer, relativeToIP=args.relativeToIP)
     # TODO fix required: for some reason, this takes really long (also true for the FMS calculation)
-    # comparator.pprintInterleaved(symbols)
+    comparator.pprintInterleaved(symbols)
 
     # calc FMS per message
     print("Calculate FMS...")
