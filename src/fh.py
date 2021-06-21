@@ -148,11 +148,12 @@ if __name__ == '__main__':
     # # # TODO Working area
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-    # TODO introduce doctests to check critical functions
+    # TODO introduce doctests to check critical functions in inference.fieldtypes
+    #   --> start with those in inference.fieldtypes that have ToDos already and fix those in the process
 
-    # TODO finalize a "literal" implementation: main script, "set aside" the fieldtypes module
-
-    # TODO derive a "improved" implementation: main script, copy/subclass the fieldtypes module and address the todos there
+    # TODO finalize a "literal" implementation:
+    #   make main script more verbose,
+    #   "set aside" the fieldtypes module as a collection of base classes for the literal and improved implementations
 
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # TODO for FTR validation, sub-class nemere.validation.messageParser.ParsingConstantsXXX
@@ -160,6 +161,17 @@ if __name__ == '__main__':
     #   nemere.validation.messageParser.MessageTypeIdentifiers
 
     # TODO FTR validation: compare to dissector/field type
+
+
+
+
+    # for later
+    #
+    # TODO derive a "improved" implementation:
+    #  main script,
+    #  copy/subclass the fieldtypes module and address the todos there
+
+
 
     # interactive
     if args.interactive:

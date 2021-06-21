@@ -294,7 +294,7 @@ def intsFromNgrams(ngrams: Iterable[bytes], endianness='big') -> List[int]:
 
 def pyitNgramEntropy(messages: List[AbstractMessage], n=1, endianness='big'):
     """
-    The vertical entropies for each offset of all the n-grams at the same offset throughout all messages
+    The vertical entropies for each offset of all the n-grams at the same offset throughout all messages.
     Implementation of entropy calculation from pyitlib. See #entropyVertical
 
     FH, Section 3.2.1
@@ -308,6 +308,10 @@ def pyitNgramEntropy(messages: List[AbstractMessage], n=1, endianness='big'):
     ... ]
     >>> ngramEntropy(messageList) == pyitNgramEntropy(messageList)
     True
+
+    :param messages: The list of messages to get the n-grams from.
+    :param n: The n in n-gram.
+    :param endianness: Endianness to interpret the n-grams in.
     """
     ngIters = [NgramIterator(msg, n) for msg in messages]
     vEntropy = list()

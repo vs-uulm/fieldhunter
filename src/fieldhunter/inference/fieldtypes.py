@@ -24,6 +24,11 @@ from nemere.inference.segments import TypedSegment
 
 
 class FieldType(ABC):
+    """
+    Generic, abstract base class for field types. Holds segments and a type label for the inferred fields.
+
+    For DocTest example see fieldhunter.inference.common#segmentedMessagesAndSymbols()
+    """
     typelabel = None
 
     def __init__(self):
@@ -41,9 +46,12 @@ class FieldType(ABC):
                          posLen: Union[Iterable[Tuple[int, int]],ItemsView[int, int]]) \
             -> List[List[TypedSegment]]:
         """
-        Generate Segments from remaining field ranges.
+        Generate Segments from (remaining) field ranges.
+
+        For DocTest example see fieldhunter.inference.common#segmentedMessagesAndSymbols()
+
         :param messages: Messages to generate n-grams to correlate to.
-        :param posLen: List of start-length tuples to create messages from.
+        :param posLen: List of start-length tuples to create segments for from each message.
         :return: Lists of segments per message generated from the posLen parameter.
         """
         segments = list()
@@ -59,6 +67,11 @@ class FieldType(ABC):
 
 
 class NonConstantNonRandomEntropyFieldType(FieldType, ABC):
+    """
+    Abstract class for inferring field types using entropy of n-gram values
+    where the entropy may neither be 0 (constant n-gram values)
+    nor equal or greater than a threshold (random n-gram values).
+    """
     # constant entropyThresh: value 0.4 determined by own empirics (notes about that?)
     entropyThresh = 0.4  # Value not given in FH!
 
@@ -441,7 +454,7 @@ class CategoricalCorrelatedField(FieldType,ABC):
 
     @property
     def categoricalCorrelation(self):
-        # !! Attribute needs to be defined in subclass init !!
+        # !! This attribute needs to be defined in subclass init !!
         # noinspection PyUnresolvedReferences
         return self._categoricalCorrelation
 
