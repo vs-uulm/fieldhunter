@@ -431,7 +431,7 @@ class CategoricalCorrelatedField(FieldType,ABC):
         """
         Generate n-grams at the same offsets for each message an correlate each n-gram using
         categorical correlation: R(x, y) = I(x: y)/H(x, y) \in [0,1]
-        Uses cls.n to determine the n-gram sizes.
+        Uses cls#n to determine the n-gram sizes and cls#_values2correlate2() to obtain tuples of data to correlate.
 
         :param messages: Messages to generate n-grams to correlate to.
         :return: Correlation values for each offset of n-grams generated from the messages.
@@ -504,15 +504,18 @@ class SessionID(CategoricalCorrelatedField):
     using categorical correlation like Host-ID.
 
     Most of FH, Section 3.2.4, refers to Host-ID, so we use all missing details from there and reuse the implementation.
+    The only difference are the values to correlate (see #_values2correlate2())
     """
     typelabel = 'Session-ID'
 
     def __init__(self, messages: List[L2NetworkMessage]):
         super().__init__()
         self._messages = messages
-        # iterate the ngrams (n=1) and create a ngScDs (instead of just ngSc: ngram/source/destination)
-        # correlate n-grams to (client IP, server IP) tuple by calculating the catCorr for the
-        #   ngram and the source/destination tuple (TODO check out how to nest the tuple right)
+        # #correlate() uses #_values2correlate2() to determine what to correlate.
+        #   Thus is iterates the n-grams (n=1) and create (n-grams,(source,destination))-tuples
+        #   (instead of just n-grams to source for Host-ID).
+        # It correlates the n-grams to the (client IP, server IP) tuple by calculating the catCorr for the
+        #   n-gram and the source/destination tuple
         self._categoricalCorrelation = type(self).correlate(messages)
         self._catCorrPosLen = type(self).catCorrPosLen(self._categoricalCorrelation)
         self._segments = type(self)._posLen2segments(messages, self._catCorrPosLen)
@@ -522,6 +525,7 @@ class SessionID(CategoricalCorrelatedField):
         """
         Get source AND destination addresses in same manner as (just) source for Host-ID.
         Recover byte representation of ipv4 address from Netzob message and make one int out if each.
+
         :param messages: Messages to generate n-grams to correlate to.
         :return: integer representation of source and destination addresses for each message.
         """
@@ -570,7 +574,7 @@ class TransID(FieldType):
         self._verticalAndHorizontalRandomNgrams()
         self._constantQRvalues()
         self._consistentCandidates()
-        # TODO not needed fot textual protocols (FH, Sec. 3.2.5, last sentence)
+        # TODO not needed for textual protocols (FH, Sec. 3.2.5, last sentence)
         self._c2sConsistentRanges = type(self)._mergeAndFilter(self._c2sConsistentCandidates)
         self._s2cConsistentRanges = type(self)._mergeAndFilter(self._s2cConsistentCandidates)
         self._segments = \
@@ -625,13 +629,19 @@ class TransID(FieldType):
         # horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
         for key, conv in self._flows.c2sInConversations().items():
             # The entropy is too low if the number of specimens is low -> relative to max
-            #  and ignore conversations of length 1 (TODO probably even more? "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
+            # and ignore conversations of length 1
+            # (TODO FH does not specify, but probably require even longer conversations to observe
+            #   that the ID changes for each request/reply pair?
+            #   "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
             if len(conv) <= 1:
                 continue
             self._c2sConvsEntropyFiltered[key] = type(self).entropyFilteredOffsets(conv, False)
         for key, conv in self._flows.s2cInConversations().items():
             # The entropy is too low if the number of specimens is low -> relative to max
-            #  and ignore conversations of length 1 (TODO probably even more? "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
+            # and ignore conversations of length 1
+            # (TODO FH does not specify, but probably require even longer conversations to observe
+            #   that the ID changes for each request/reply pair?
+            #   "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
             if len(conv) <= 1:
                 continue
             self._s2cConvsEntropyFiltered[key] = type(self).entropyFilteredOffsets(conv, False)

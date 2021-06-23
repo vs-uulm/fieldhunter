@@ -132,7 +132,7 @@ if __name__ == '__main__':
     # # import cProfile
     # # profiler = cProfile.Profile()
     # # profiler.enable()
-    # comparator.pprintInterleaved(symbols)
+    comparator.pprintInterleaved(symbols)
     # # profiler.disable()
     # # profiler.dump_stats(f"pprintInterleaved-{time():.0f}-{filechecker.pcapstrippedname}.profile")
     #
