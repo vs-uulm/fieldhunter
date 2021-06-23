@@ -16,6 +16,8 @@ import IPython
 from nemere.utils.loader import SpecimenLoader
 from nemere.validation.dissectorMatcher import MessageComparator, DissectorMatcher
 from nemere.utils.reportWriter import writeReport
+from nemere.utils.evaluationHelpers import StartupFilecheck
+
 from fieldhunter.inference.fieldtypes import *
 from fieldhunter.inference.common import segmentedMessagesAndSymbols
 from fieldhunter.utils.base import Flows
@@ -34,14 +36,7 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--relativeToIP', default=True, action='store_true')
     args = parser.parse_args()
 
-    if not isfile(args.pcapfilename):
-        print('File not found: ' + args.pcapfilename)
-        exit(1)
-    pcapbasename = basename(args.pcapfilename)
-    trace = splitext(pcapbasename)[0]
-    # reportFolder = join(reportFolder, trace)
-    # if not exists(reportFolder):
-    #    makedirs(reportFolder)
+    filechecker = StartupFilecheck(args.pcapfilename)
 
     specimens = SpecimenLoader(args.pcapfilename, layer=args.layer, relativeToIP = args.relativeToIP)
     # noinspection PyTypeChecker
@@ -49,7 +44,7 @@ if __name__ == '__main__':
     flows = Flows(messages)
 
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-    print("Hunting fields in", trace)
+    print("Hunting fields in", filechecker.pcapstrippedname)
     inferenceStart = time()
 
     # MSG-type
@@ -122,7 +117,7 @@ if __name__ == '__main__':
 
     segmentedMessages, symbols = segmentedMessagesAndSymbols(
         # in order of fieldtypes.precedence!
-        (msgtypefields, msglenfields,
+        (msglenfields, msgtypefields,
          # Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence
          hostidfields, sessionidfields,
          transidfields, accumulatorfields),
@@ -133,15 +128,21 @@ if __name__ == '__main__':
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
     comparator = MessageComparator(specimens, layer=args.layer, relativeToIP=args.relativeToIP)
-    # TODO fix required: for some reason, this takes really long (also true for the FMS calculation)
-    comparator.pprintInterleaved(symbols)
-
-    # calc FMS per message
-    print("Calculate FMS...")
-    message2quality = DissectorMatcher.symbolListFMS(comparator, symbols)
-
-    # write statistics to csv
-    writeReport(message2quality, inferenceDuration, specimens, comparator, "fieldhunter-literal")
+    print("Dissection complete.")
+    # # import cProfile
+    # # profiler = cProfile.Profile()
+    # # profiler.enable()
+    # comparator.pprintInterleaved(symbols)
+    # # profiler.disable()
+    # # profiler.dump_stats(f"pprintInterleaved-{time():.0f}-{filechecker.pcapstrippedname}.profile")
+    #
+    # # calc FMS per message
+    # print("Calculate FMS...")
+    # message2quality = DissectorMatcher.symbolListFMS(comparator, symbols)
+    #
+    # # write statistics to csv
+    # writeReport(message2quality, inferenceDuration, specimens, comparator, "fieldhunter-literal",
+    #             filechecker.reportFullPath)
 
 
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #

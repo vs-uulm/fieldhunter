@@ -229,7 +229,9 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
 
         self._msgDirection = list()
         c2s, s2c = flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
-        for direction in [c2s, s2c]:  # per direction - for MSG-Len this is pointless, but the paper says to do it.
+        # per direction - for MSG-Len this is pointless, but the paper says to do it.
+        #   it might rather be useful to separate message types (distinct formats) in this manner.
+        for direction in [c2s, s2c]:
             self._msgDirection.append(MSGlen.Direction(direction))
 
     @property
@@ -242,8 +244,9 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
 
     class Direction(object):
         """
-        Encapsulates direction-wise inference of fields.
-        Roughly corresponds to the S2C-collection branch depicted in the flow graph of FH, Fig. 3 center.
+        Encapsulates direction-wise inference of MSGlen fields.
+        Roughly corresponds to either the S2C-collection or C2S-collection branch
+        depicted in the flow graph of FH, Fig. 3 center.
 
         Provides methods to extract different size collections, finding candidates by Pearson correlation coefficient,
         and verifying the hypothesis of candidates denoting the length of the message.
@@ -262,17 +265,12 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
             """Associates offset with a field length (n-gram's n) to define a list of unambiguous MSG-Len candidates"""
             # noinspection PyTypeChecker
             self._acceptedX = None  # type: Dict[int, numpy.ndarray]
-            # # noinspection PyTypeChecker
-            # self._segments = list()  # type: List[List[TypedSegment]]
+            """Maps offsets to (a,b) that solve the linear equation in #verifyCandidates() 
+            (FH: 'Msg. Len. Model Parameters')"""
 
             self.differentSizeCollections()
             self.findCandidates()
             self.verifyCandidates()
-            # # validation of TODO in #verifyCandidates for SMB [1., 4.] -> would help
-            # aX = numpy.array(self._acceptedX[0])
-            # aX.mean(0)
-            # aX.min(0)
-            # aX.max(0)
 
             # create segments for each accepted candidate
             self._segments = MSGlen._posLen2segments(self._direction, self.acceptedCandidates.items())
@@ -282,7 +280,7 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
             "stratifying messages by length": extract different size collection -> vector of message lengths
 
             :return: List of messages that contains an equal amount of messages of each length,
-                List of according message lengths
+                i. e., List of according message lengths
             """
             if len(self._direction) == 0:  # "No flows in this direction."
                 self._msgmixlen = list()
@@ -302,15 +300,27 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
             self._msgmixlen = msgmixlen
 
         def findCandidates(self):
+            """
+            Find message-length candidates (in parenthesis: block names from FH, Fig. 3 center):
+            * filter for message offsets where the n-gram is not constant and not random (Entropy Filter)
+            * correlate n-grams to message lengths (Pearson Correlation)
+
+            :return: The offsets (dict value: list) where the Pearson Correlation
+                exceeds the threshold MSGlen.minCorrelation
+                for different sized n-grams (dict key).
+            """
+            # "Extract Vector of Message Length"
             lens4msgmix = [len(m.data) for m in self._msgmixlen]  # type: List[int]
             candidateAtNgram = dict()
             # iterate n-grams' n=32, 24, 16 bits (4, 3, 2 bytes), see 3.1.2
             for n in [4, 3, 2]:
-                # entropy filter for each n-gram offset -> field values matrix
+                # entropy filter for each n-gram offset for "Field Values Matrix" below
                 offsets = MSGlen.entropyFilteredOffsets(self._msgmixlen, n)
                 # TODO currently only big endian, see #intsFromNgrams
+                # TODO for textual protocols decode the n-gram as (ASCII) number (FH, Sec. 3.2.2, second paragraph)
                 ngIters = (intsFromNgrams(iterateSelected(NgramIterator(msg, n), offsets)) for msg in self._msgmixlen)
-                ngramsAtOffsets = numpy.array(list(ngIters))  # TODO check if null byte ngrams cause problems
+                # "Field Values Matrix"
+                ngramsAtOffsets = numpy.array(list(ngIters))
 
                 # correlate columns of ngramsAtOffsets to lens4msgmix
                 pearsonAtOffset = list()
@@ -322,17 +332,17 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
 
         def verifyCandidates(self):
             """
-            Verify length-hypothesis for candidates, solve for values at ngrams
-            in candidateAtNgram (precedence for larger n).
+            Verify the length-hypothesis for candidates, by solving the linear equation
+            for values at the candidate n-grams in candidateAtNgram (precedence for larger n, i. e., longer fields):
+
               MSG_len = a * value + b (a > 0, b \in N)  - "Msg. Len. Model Parameters"
                   lens4msgmix = ngramsAtOffsets[:,candidateAtNgram[n]] * a + 1 * b
-              threshold 0.9 of the message pairs with different lengths
 
-            :return:
+            At least a threshold 0.9 of the message pairs with different lengths has to fulfill the hypothesis.
             """
             acceptedCandidates = dict()  # type: Dict[int, int]
             acceptedX = dict()
-            #           specifying found acceptable solutions at offset (key) with n (value) for this direction
+            # specifying found acceptable solutions at offset (key) with n (value) for this direction
             for n in [4, 3, 2]:
                 for offset in self._candidateAtNgram[n]:
                     # check precedence: if longer already-accepted n-gram overlaps this offset ignore
@@ -350,8 +360,8 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
                                 solutionAcceptable[(msg0, msg1)] = False
                                 continue
                             A = numpy.array( [intsFromNgrams(ngramPair), [1, 1]] ).T
-                            B = numpy.array([len(msg0.data), len(msg1.data)])
-                            try:
+                            B = numpy.array( [len(msg0.data), len(msg1.data)] )
+                            try:  # solve the linear equation
                                 X = numpy.linalg.inv(A).dot(B)
                                 solutionAcceptable[(msg0, msg1)] = X[0] > 0 and X[1].is_integer()
                                 Xes.append(X)
@@ -362,8 +372,12 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
                     if acceptCount[True]/len(acceptCount) > MSGlen.lenhypoThresh:
                         acceptedCandidates[offset] = n
                         acceptedX[offset] = Xes
-                        # TODO FH does not require this, but should not the values in A and B be equal within so that
-                        #  a and b is one scalar value each?
+                        # TODO FH does not require this, but the values in A and B should be equal within,
+                        #  so that a and b is one scalar value each. Otherwise we end up with lots of FPs.
+                        #  Example: In SMB, the 'Msg. Len. Model Parameters' (a,b) == [1., 4.]
+                        #  of the 4-gram at offset 0, 4 is nbss.length, i. e., a TP!
+                        #  Offsets 16 and 22 are FP, but with diverging A and B vectors.
+                        #  Thus, requiring that a and b are scalars here would help
             self._acceptedCandidates = acceptedCandidates
             self._acceptedX = {offset: numpy.array(aX) for offset, aX in acceptedX.items()}
 
@@ -556,6 +570,7 @@ class TransID(FieldType):
         self._verticalAndHorizontalRandomNgrams()
         self._constantQRvalues()
         self._consistentCandidates()
+        # TODO not needed fot textual protocols (FH, Sec. 3.2.5, last sentence)
         self._c2sConsistentRanges = type(self)._mergeAndFilter(self._c2sConsistentCandidates)
         self._s2cConsistentRanges = type(self)._mergeAndFilter(self._s2cConsistentCandidates)
         self._segments = \
@@ -822,5 +837,6 @@ class Accumulator(FieldType):
 
 
 # Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence
-precedence = {MSGtype.typelabel: 0, MSGlen.typelabel: 1, HostID.typelabel: 2,
+# MSG-Len would be overwritten by MSG-Type (see SMB: nbss.length)  # TODO double check for FPs!
+precedence = {MSGtype.typelabel: 1, MSGlen.typelabel: 0, HostID.typelabel: 2,
                               SessionID.typelabel: 3, TransID.typelabel: 4, Accumulator.typelabel: 5}
