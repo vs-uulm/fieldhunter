@@ -127,22 +127,19 @@ if __name__ == '__main__':
     inferenceDuration = time() - inferenceStart
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
+    nontrivialSymbols = [sym for sym in symbols if len(sym.fields) > 1]
     comparator = MessageComparator(specimens, layer=args.layer, relativeToIP=args.relativeToIP)
     print("Dissection complete.")
-    # # import cProfile
-    # # profiler = cProfile.Profile()
-    # # profiler.enable()
-    comparator.pprintInterleaved(symbols)
-    # # profiler.disable()
-    # # profiler.dump_stats(f"pprintInterleaved-{time():.0f}-{filechecker.pcapstrippedname}.profile")
-    #
-    # # calc FMS per message
-    # print("Calculate FMS...")
-    # message2quality = DissectorMatcher.symbolListFMS(comparator, symbols)
-    #
-    # # write statistics to csv
-    # writeReport(message2quality, inferenceDuration, specimens, comparator, "fieldhunter-literal",
-    #             filechecker.reportFullPath)
+    comparator.pprintInterleaved(nontrivialSymbols)
+    print(f"\n   + {len(symbols)-len(nontrivialSymbols)} messages without any inferred fields.")
+
+    # calc FMS per message
+    print("Calculate FMS...")
+    message2quality = DissectorMatcher.symbolListFMS(comparator, symbols)
+
+    # write statistics to csv
+    writeReport(message2quality, inferenceDuration, specimens, comparator, "fieldhunter-literal",
+                filechecker.reportFullPath)
 
 
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #

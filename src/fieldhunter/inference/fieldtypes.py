@@ -251,6 +251,9 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
         Provides methods to extract different size collections, finding candidates by Pearson correlation coefficient,
         and verifying the hypothesis of candidates denoting the length of the message.
         """
+        # TODO also support little endian
+        endianness = 'big'
+
         def  __init__(self, direction: List[L4NetworkMessage]):
             self._direction = direction
             # noinspection PyTypeChecker
@@ -316,9 +319,10 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
             for n in [4, 3, 2]:
                 # entropy filter for each n-gram offset for "Field Values Matrix" below
                 offsets = MSGlen.entropyFilteredOffsets(self._msgmixlen, n)
-                # TODO currently only big endian, see #intsFromNgrams
+                # TODO currently only tested for big endian, see #intsFromNgrams
                 # TODO for textual protocols decode the n-gram as (ASCII) number (FH, Sec. 3.2.2, second paragraph)
-                ngIters = (intsFromNgrams(iterateSelected(NgramIterator(msg, n), offsets)) for msg in self._msgmixlen)
+                ngIters = (intsFromNgrams(
+                    iterateSelected(NgramIterator(msg, n), offsets), type(self).endianness) for msg in self._msgmixlen)
                 # "Field Values Matrix"
                 ngramsAtOffsets = numpy.array(list(ngIters))
 
@@ -656,10 +660,10 @@ class TransID(FieldType):
         s2cOffsetLists = [set(offsetlist) for offsetlist in self._s2cConvsEntropyFiltered.values()]
         self._s2cHorizontalOffsets = set.intersection(*s2cOffsetLists) if len(s2cOffsetLists) > 0 else set()
         # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _c2sConvsEntropyFiltered
-        # (TODO use entry for this query specifically?)
+        # (TODO alternatively, deviating from FH, use the offset for each query specifically?)
         self._c2sCombinedOffsets = self._c2sHorizontalOffsets.intersection(self._c2sEntropyFiltered)
         # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _s2cConvsEntropyFiltered
-        # (TODO the entry for this resp specifically?)
+        # (TODO alternatively, deviating from FH, use the entry for each response specifically?)
         self._s2cCombinedOffsets = self._s2cHorizontalOffsets.intersection(self._s2cEntropyFiltered)
 
     def _constantQRvalues(self):
@@ -723,6 +727,7 @@ class Accumulator(FieldType):
     """
     typelabel = 'Accumulator'
 
+    # TODO also support little endian
     endianness = 'big'
     ns = (8, 4, 3, 2)
     deltaEntropyThresh = 0.8  # Not given in FH, own empirics: 0.2
@@ -773,7 +778,7 @@ class Accumulator(FieldType):
                         deltas[n] = dict()
                     for offset, (ngramA, ngramB) in enumerate(zip(NgramIterator(msgA, n), NgramIterator(msgB, n))):
                         # calculate delta between n-grams (n and offset identical) two subsequent messages
-                        # TODO also support little endian
+                        # TODO test support little endian
                         delta = int.from_bytes(ngramB, cls.endianness) - int.from_bytes(ngramA, cls.endianness)
                         if offset not in deltas[n]:
                             deltas[n][offset] = list()
