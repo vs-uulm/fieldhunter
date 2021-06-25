@@ -4,10 +4,9 @@ Only implements FH's binary message handling using n-grams (not textual using de
 
 from argparse import ArgumentParser
 from time import time
-from os.path import isfile, basename, splitext
 
 # noinspection PyUnresolvedReferences
-from netzob.Model.Vocabulary.Domain.Parser.MessageParser import InvalidParsingPathException
+from tabulate import tabulate
 # noinspection PyUnresolvedReferences
 from pprint import pprint
 # noinspection PyUnresolvedReferences
@@ -21,6 +20,9 @@ from nemere.utils.evaluationHelpers import StartupFilecheck
 from fieldhunter.inference.fieldtypes import *
 from fieldhunter.inference.common import segmentedMessagesAndSymbols
 from fieldhunter.utils.base import Flows
+from fieldhunter.utils.eval import FieldTypeReport
+
+
 
 
 if __name__ == '__main__':
@@ -33,7 +35,7 @@ if __name__ == '__main__':
     parser.add_argument('-l', '--layer', type=int, default=2,
                         help='Protocol layer relative to IP to consider. Default is 2 layers above IP '
                              '(typically the payload of a transport protocol).')
-    parser.add_argument('-r', '--relativeToIP', default=True, action='store_true')
+    parser.add_argument('-r', '--relativeToIP', default=True, action='store_false')
     args = parser.parse_args()
 
     filechecker = StartupFilecheck(args.pcapfilename)
@@ -63,46 +65,11 @@ if __name__ == '__main__':
     # Host-ID
     print("Inferring", HostID.typelabel)
     hostidfields = HostID(messages)
-    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-    # # # # Investigate low categoricalCorrelation for all but one byte within an address field (see NTP and DHCP).
-    # # # # According to NTP offset 12 (REF ID, often DST IP address) and DHCP offsets (12, 17, and) 20 (IPs)
-    # # # # this works in principle, but if the n-gram is too short the correlation gets lost for some n-grams.
-    # # print(tabulate(zip(*[hostidfields.categoricalCorrelation]), showindex="always"))
-    # # from matplotlib import pyplot
-    # # pyplot.bar(range(len(hostidfields.categoricalCorrelation)), hostidfields.categoricalCorrelation)
-    # # pyplot.show()
-    # # # sum([msg.data[20:24] == bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
-    # # # sum([int.from_bytes(messages[m].data[20:24], "big") == srcs[m] for m in range(len(messages))])
-    # # # # While the whole bootp.ip.server [20:24] correlates nicely to the IP address, single n-grams don't.
-    # # serverIP = [(int.from_bytes(messages[m].data[20:24], "big"), srcs[m]) for m in range(len(messages))]
-    # # serverIP0 = [(messages[m].data[20], srcs[m]) for m in range(len(messages))]
-    # # serverIP1 = [(messages[m].data[21], srcs[m]) for m in range(len(messages))]
-    # # serverIP2 = [(messages[m].data[22], srcs[m]) for m in range(len(messages))]
-    # # serverIP3 = [(messages[m].data[23], srcs[m]) for m in range(len(messages))]
-    # # # nsp = numpy.array([sip for sip in serverIP])
-    # # # # The correlation is perfect, if null values are omitted
-    # # nsp = numpy.array([sip for sip in serverIP if sip[0] != 0])   #  and sip[0] == sip[1]
-    # # # nsp0 = numpy.array(serverIP0)
-    # # # nsp1 = numpy.array(serverIP1)
-    # # # nsp2 = numpy.array(serverIP2)
-    # # # nsp3 = numpy.array(serverIP3)
-    # # nsp0 = numpy.array([sip for sip in serverIP0 if sip[0] != 0])
-    # # nsp1 = numpy.array([sip for sip in serverIP1 if sip[0] != 0])
-    # # nsp2 = numpy.array([sip for sip in serverIP2 if sip[0] != 0])
-    # # nsp3 = numpy.array([sip for sip in serverIP3 if sip[0] != 0])
-    # # for serverSrcPairs in [nsp, nsp0, nsp1, nsp2, nsp3]:
-    # #     print(drv.information_mutual(serverSrcPairs[:, 0], serverSrcPairs[:, 1]) / drv.entropy_joint(serverSrcPairs.T))
-    # # # # TODO This is no implementation error, but raises doubts about the Host-ID description completeness:
-    # # # #  Probably it does not mention an Entropy filter, direction separation, or - most probably -
-    # # # #  an iterative n-gram size increase/decrease.
-    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # print(HostID.catCorrPosLen(hostidfields.categoricalCorrelation))
 
     # Session-ID (FH, Section 3.2.4)
     print("Inferring", SessionID.typelabel)
     sessionidfields = SessionID(messages)
-    # # Problem similar to Host-ID leads to same bad performance.
-    # # Moreover, Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence.
     # print(HostID.catCorrPosLen(sessionidfields.categoricalCorrelation))
 
     # Trans-ID (FH, Section 3.2.5)
@@ -115,18 +82,25 @@ if __name__ == '__main__':
     accumulatorfields = Accumulator(flows)
     # pprint(accumulatorfields.segments)
 
-    segmentedMessages, symbols = segmentedMessagesAndSymbols(
-        # in order of fieldtypes.precedence!
-        (msglenfields, msgtypefields,
-         # Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence
-         hostidfields, sessionidfields,
-         transidfields, accumulatorfields),
-        messages
-    )
+    # in order of fieldtypes.precedence!
+    sortedInferredTypes = sorted(
+        (msglenfields, msgtypefields, hostidfields, sessionidfields, transidfields, accumulatorfields),
+        key=lambda l: precedence[l.typelabel] )
+    segmentedMessages, symbols = segmentedMessagesAndSymbols(sortedInferredTypes, messages)
 
     inferenceDuration = time() - inferenceStart
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
+    print(tabulate(
+        [(infield.typelabel,
+          sum(1 for msgsegs in infield.segments if len(msgsegs) > 0),
+          max(len(msgsegs) for msgsegs in infield.segments)
+          ) for infield in sortedInferredTypes],
+        headers=["typelabel","messages","max inferred per msg"]
+    ))
+
+    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+    
     nontrivialSymbols = [sym for sym in symbols if len(sym.fields) > 1]
     comparator = MessageComparator(specimens, layer=args.layer, relativeToIP=args.relativeToIP)
     print("Dissection complete.")
@@ -136,22 +110,30 @@ if __name__ == '__main__':
     # calc FMS per message
     print("Calculate FMS...")
     message2quality = DissectorMatcher.symbolListFMS(comparator, symbols)
-
     # write statistics to csv
     writeReport(message2quality, inferenceDuration, specimens, comparator, "fieldhunter-literal",
                 filechecker.reportFullPath)
-
 
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # # # TODO Working area
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-    # TODO introduce doctests to check critical functions in inference.fieldtypes
-    #   --> start with those in inference.fieldtypes that have ToDos already and fix those in the process
-
     # TODO finalize a "literal" implementation:
     #   make main script more verbose,
     #   "set aside" the fieldtypes module as a collection of base classes for the literal and improved implementations
+
+    for infields in sortedInferredTypes:
+        infieldreport = FieldTypeReport(infields, comparator)
+        print(f"\nReport for {infieldreport.typelabel}:\n" + tabulate(
+            infieldreport.lookupOverlap(), headers=infieldreport.headers ))
+    # msglenfields
+    # msgtypefields
+    # hostidfields
+    # sessionidfields
+    # transidfields
+    # accumulatorfields
+
+
 
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # TODO for FTR validation, sub-class nemere.validation.messageParser.ParsingConstantsXXX
@@ -173,7 +155,5 @@ if __name__ == '__main__':
 
     # interactive
     if args.interactive:
-        # noinspection PyUnresolvedReferences
-        from tabulate import tabulate
         IPython.embed()
 

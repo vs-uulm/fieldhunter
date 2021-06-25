@@ -1,5 +1,7 @@
 """
 Infer message field types according to the FieldHunter paper Section 3.2
+
+TODO introduce doctests to check critical functions in inference.fieldtypes
 """
 from typing import List, Tuple, Dict, Iterable, ItemsView, Union
 import random
@@ -102,7 +104,7 @@ class MSGtype(NonConstantNonRandomEntropyFieldType):
     The properties of this class provide access to intermediate and final results.
     """
     typelabel = "MSG-Type"
-    causalityThresh = 0.6  # FH, Sec. 3.2.1 says 0.8, but that leaves no candidates for our traces
+    causalityThresh = 0.6  # TODO FH, Sec. 3.2.1 says 0.8, but that leaves no candidates for our traces
 
     def __init__(self, flows: Flows):
         super().__init__()
@@ -381,7 +383,9 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
                         #  Example: In SMB, the 'Msg. Len. Model Parameters' (a,b) == [1., 4.]
                         #  of the 4-gram at offset 0, 4 is nbss.length, i. e., a TP!
                         #  Offsets 16 and 22 are FP, but with diverging A and B vectors.
-                        #  Thus, requiring that a and b are scalars here would help
+                        #  Thus, requiring that a and b are scalars here would help.
+                        #  Another example: In DNS, the beginning of the queried name is a FP (probably due to DNS'
+                        #  subdomain numbered separator scheme).
             self._acceptedCandidates = acceptedCandidates
             self._acceptedX = {offset: numpy.array(aX) for offset, aX in acceptedX.items()}
 
@@ -481,6 +485,42 @@ class HostID(CategoricalCorrelatedField):
     """
     Host identifier (Host-ID) inference (FH, Sec. 3.2.3)
     Find n-gram that is strongly correlated with IP address of sender.
+
+
+    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+    # # # # Investigate low categoricalCorrelation for all but one byte within an address field (see NTP and DHCP).
+    # # # # According to NTP offset 12 (REF ID, often DST IP address) and DHCP offsets (12, 17, and) 20 (IPs)
+    # # # # this works in principle, but if the n-gram is too short the correlation gets lost for some n-grams.
+    # # print(tabulate(zip(*[hostidfields.categoricalCorrelation]), showindex="always"))
+    # # from matplotlib import pyplot
+    # # pyplot.bar(range(len(hostidfields.categoricalCorrelation)), hostidfields.categoricalCorrelation)
+    # # pyplot.show()
+    # # # sum([msg.data[20:24] == bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
+    # # # sum([int.from_bytes(messages[m].data[20:24], "big") == srcs[m] for m in range(len(messages))])
+    # # # # While the whole bootp.ip.server [20:24] correlates nicely to the IP address, single n-grams don't.
+    # # serverIP = [(int.from_bytes(messages[m].data[20:24], "big"), srcs[m]) for m in range(len(messages))]
+    # # serverIP0 = [(messages[m].data[20], srcs[m]) for m in range(len(messages))]
+    # # serverIP1 = [(messages[m].data[21], srcs[m]) for m in range(len(messages))]
+    # # serverIP2 = [(messages[m].data[22], srcs[m]) for m in range(len(messages))]
+    # # serverIP3 = [(messages[m].data[23], srcs[m]) for m in range(len(messages))]
+    # # # nsp = numpy.array([sip for sip in serverIP])
+    # # # # The correlation is perfect, if null values are omitted
+    # # nsp = numpy.array([sip for sip in serverIP if sip[0] != 0])   #  and sip[0] == sip[1]
+    # # # nsp0 = numpy.array(serverIP0)
+    # # # nsp1 = numpy.array(serverIP1)
+    # # # nsp2 = numpy.array(serverIP2)
+    # # # nsp3 = numpy.array(serverIP3)
+    # # nsp0 = numpy.array([sip for sip in serverIP0 if sip[0] != 0])
+    # # nsp1 = numpy.array([sip for sip in serverIP1 if sip[0] != 0])
+    # # nsp2 = numpy.array([sip for sip in serverIP2 if sip[0] != 0])
+    # # nsp3 = numpy.array([sip for sip in serverIP3 if sip[0] != 0])
+    # # for serverSrcPairs in [nsp, nsp0, nsp1, nsp2, nsp3]:
+    # #     print(drv.information_mutual(serverSrcPairs[:, 0], serverSrcPairs[:, 1]) / drv.entropy_joint(serverSrcPairs.T))
+    # # # # TODO This is no implementation error, but raises doubts about the Host-ID description completeness:
+    # # # #  Probably it does not mention an Entropy filter, direction separation, or - most probably -
+    # # # #  an iterative n-gram size increase (see MSGlen).
+    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
     """
     typelabel = 'Host-ID'
 
@@ -509,6 +549,9 @@ class SessionID(CategoricalCorrelatedField):
 
     Most of FH, Section 3.2.4, refers to Host-ID, so we use all missing details from there and reuse the implementation.
     The only difference are the values to correlate (see #_values2correlate2())
+
+    # # TODO Problem similar to Host-ID leads to same bad quality.
+    # # Moreover, Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence.
     """
     typelabel = 'Session-ID'
 
@@ -853,5 +896,10 @@ class Accumulator(FieldType):
 
 # Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence
 # MSG-Len would be overwritten by MSG-Type (see SMB: nbss.length)  # TODO double check for FPs!
-precedence = {MSGtype.typelabel: 1, MSGlen.typelabel: 0, HostID.typelabel: 2,
-                              SessionID.typelabel: 3, TransID.typelabel: 4, Accumulator.typelabel: 5}
+precedence = {MSGlen.typelabel: 0, MSGtype.typelabel: 1, HostID.typelabel: 2,
+              SessionID.typelabel: 3, TransID.typelabel: 4, Accumulator.typelabel: 5}
+"""
+The order in which to map field types to messages. 
+Lower numbers take precedence over higher numbers, so that the type with the higher number will be ignored 
+if overlapping at the same offet range in the message.
+"""
