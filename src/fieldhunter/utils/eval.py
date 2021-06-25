@@ -29,6 +29,10 @@ class FieldTypeReport(object):
                             overlapRatio, overlapIndex, overlapOffset, overlapEnd, overlapValue,
                             seg.message.date, messagetype, fieldname, fieldtype])
 
+            # TODO determine what is a TP/FP using GroundTruth
+            # TODO incorporate the precedence of multiple overlapping inferred fields (column: "hidden by other type")
+            #
+
         return tabdata
 
     @property
@@ -42,12 +46,12 @@ class FieldTypeReport(object):
 
 class GroundTruth(object):
     """tshark dissector field names for sample protocols mapped from the FieldHunter field type class."""
-    fieldtypes = {  # TODO fill completely
+    fieldtypes = {
         MSGlen.typelabel:    ["nbss.length"],
         MSGtype.typelabel:   ["dhcp.option.dhcp", "ntp.flags", "ntp.stratum", "dns.flags",
                               "nbns.flags", "smb.cmd", "smb.flags", ],
-        HostID.typelabel:    [],
-        SessionID.typelabel: ["smb.pid", "smb.uid", "smb.mid"],
+        HostID.typelabel:    ["dhcp.ip.client", "dhcp.ip.your", "dhcp.ip.server", "ntp.refid"],
+        SessionID.typelabel: ["dhcp.id", "smb.pid", "smb.uid", "smb.mid"],
         TransID.typelabel:   ["dns.id"],
         Accumulator.typelabel: []
     }

@@ -100,7 +100,7 @@ if __name__ == '__main__':
     ))
 
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-    
+
     nontrivialSymbols = [sym for sym in symbols if len(sym.fields) > 1]
     comparator = MessageComparator(specimens, layer=args.layer, relativeToIP=args.relativeToIP)
     print("Dissection complete.")
@@ -118,10 +118,6 @@ if __name__ == '__main__':
     # # # TODO Working area
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-    # TODO finalize a "literal" implementation:
-    #   make main script more verbose,
-    #   "set aside" the fieldtypes module as a collection of base classes for the literal and improved implementations
-
     for infields in sortedInferredTypes:
         infieldreport = FieldTypeReport(infields, comparator)
         print(f"\nReport for {infieldreport.typelabel}:\n" + tabulate(
@@ -133,22 +129,22 @@ if __name__ == '__main__':
     # transidfields
     # accumulatorfields
 
+    # TODO finalize a "literal" implementation:
+    #   fix TODO for MSG-type
+    # TODO FTR validation: calculate TP/FP/FN ==> P/R per protocol and per type
 
 
-    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-    # TODO for FTR validation, sub-class nemere.validation.messageParser.ParsingConstantsXXX
-    #   set TYPELOOKUP[x] to the value FieldType.typelabel (e. g., "MSG-Type") for all fields in
-    #   nemere.validation.messageParser.MessageTypeIdentifiers
 
-    # TODO FTR validation: compare to dissector/field type
+
 
 
 
 
     # for later
     #
-    # TODO derive a "improved" implementation:
-    #  main script,
+    # TODO derive an "improved" implementation:
+    #  new separate main script,
+    #  define a collection of base classes for the literal and improved implementations,
     #  copy/subclass the fieldtypes module and address the todos there
 
 
