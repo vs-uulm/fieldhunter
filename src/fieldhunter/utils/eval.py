@@ -78,10 +78,11 @@ class GroundTruth(object):
     def entropyPerField(self, fieldname: str):
         """Collect true fields values and calculate their entropy for the current trace."""
         fieldsValues = [bytes.fromhex(hexval) for hexval in self._comparator.lookupValues4FieldName(fieldname)]
-        fieldLengths = Counter(len(bv) for bv in fieldsValues)
-        mostCommonLen = fieldLengths.most_common(1)[0][0]  # should normally be a constant value for this kind of fields
-        logging.getLogger(__name__).debug(f"Field lengths of {fieldname}: {repr(fieldLengths)}")
         if len(fieldsValues) > 0:
+            fieldLengths = Counter(len(bv) for bv in fieldsValues)
+            # should normally be a constant value for this kind of fields
+            mostCommonLen = fieldLengths.most_common(1)[0][0]
+            logging.getLogger(__name__).debug(f"Field lengths of {fieldname}: {repr(fieldLengths)}")
             entropy = drv.entropy(intsFromNgrams(fieldsValues, self._endianness)) / (mostCommonLen * 8)
         else:
             entropy = numpy.nan
