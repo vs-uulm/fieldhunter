@@ -12,7 +12,10 @@ from pprint import pprint
 # noinspection PyUnresolvedReferences
 import IPython
 
-from nemere import StartupFilecheck, SpecimenLoader, MessageComparator, DissectorMatcher, writeReport
+from nemere.utils.loader import SpecimenLoader
+from nemere.utils.evaluationHelpers import StartupFilecheck
+from nemere.utils.reportWriter import writeReport
+from nemere.validation.dissectorMatcher import MessageComparator, DissectorMatcher
 
 from fieldhunter.inference.fieldtypes import *
 from fieldhunter.inference.common import segmentedMessagesAndSymbols

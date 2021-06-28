@@ -14,7 +14,11 @@ input="input/maxdiff-fromOrig/*-100*.pcap input/deduped-orig/*-100*.pcap"
 #report=reports/tft-${tftnpad}-clustering-${currcomm}
 #mkdir ${report}
 
-for fn in ${input} ; do python src/trace_statistics.py ${fn} ; done
+for fn in ${input} ; do
+  python src/trace_statistics.py ${fn}
+  # Give tshark some time to recover
+  sleep 3
+done
 
 #mv reports/*.csv ${report}/
 #mv reports/*.pdf ${report}/

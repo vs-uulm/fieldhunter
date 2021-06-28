@@ -3,11 +3,14 @@ This script provides statistics about the given PCAP trace that have impact on t
 """
 from argparse import ArgumentParser
 
-import numpy, logging
+import logging
 from tabulate import tabulate
 import IPython
 
-from nemere import MessageComparator, SpecimenLoader, StartupFilecheck, reportFolder
+from nemere.utils.loader import SpecimenLoader
+from nemere.utils.evaluationHelpers import StartupFilecheck, reportFolder
+from nemere.validation.dissectorMatcher import MessageComparator
+
 from fieldhunter.inference.fieldtypes import *
 from fieldhunter.utils.base import Flows
 from fieldhunter.utils.eval import GroundTruth, csvAppend
@@ -60,8 +63,6 @@ if __name__ == '__main__':
     # write/append to a file. Columns: trace, field name, type label, sample count, entropy
     csvAppend(reportFolder, "typeAndLengthEntropies", header,
               ([filechecker.pcapstrippedname, *row] for row in gtTypeAndLengthEntropies if not numpy.isnan(row[-1])))
-    # TODO
-    #   calculate for all relevant protocols
     # # # # # # # # # # # # # # # # # #
 
 

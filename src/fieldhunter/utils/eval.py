@@ -2,7 +2,7 @@ import os, csv, logging
 from typing import Any
 from collections import Counter
 
-from nemere import MessageComparator
+from nemere.validation.dissectorMatcher import MessageComparator
 
 from fieldhunter.inference.fieldtypes import *
 

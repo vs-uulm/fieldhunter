@@ -74,8 +74,10 @@ class NonConstantNonRandomEntropyFieldType(FieldType, ABC):
     where the entropy may neither be 0 (constant n-gram values)
     nor equal or greater than a threshold (random n-gram values).
     """
-    # constant entropyThresh: value 0.4 determined by own empirics (notes about that?)
-    entropyThresh = 0.4  # Value not given in FH!
+    # Value for entropyThresh not given in FH!
+    # We use a constant entropyThresh of 0.4 determined by own empirics (results of /src/trace_statistics.py in
+    #   nemesys-reports/NEMEFTR/fieldhunter/typeAndLengthEntropies.ods)
+    entropyThresh = 0.4
 
     @classmethod
     def entropyFilteredOffsets(cls, messages: List[AbstractMessage], n: int):
