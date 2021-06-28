@@ -12,10 +12,7 @@ from pprint import pprint
 # noinspection PyUnresolvedReferences
 import IPython
 
-from nemere.utils.loader import SpecimenLoader
-from nemere.validation.dissectorMatcher import MessageComparator, DissectorMatcher
-from nemere.utils.reportWriter import writeReport
-from nemere.utils.evaluationHelpers import StartupFilecheck
+from nemere import StartupFilecheck, SpecimenLoader, MessageComparator, DissectorMatcher, writeReport
 
 from fieldhunter.inference.fieldtypes import *
 from fieldhunter.inference.common import segmentedMessagesAndSymbols
@@ -52,8 +49,6 @@ if __name__ == '__main__':
     # MSG-type
     print("Inferring", MSGtype.typelabel)
     msgtypefields = MSGtype(flows)
-    # TODO The entropyThresh is not given in FH, so generate some statistics, illustrations,
-    #   CDF, histograms, ... using our traces
     # print(tabulate(zip(msgtypefields.c2sEntropy, msgtypefields.s2cEntropy), headers=["c2s", "s2c"], showindex=True))
 
     # MSG-len
@@ -130,7 +125,7 @@ if __name__ == '__main__':
     # accumulatorfields
 
     # TODO finalize a "literal" implementation:
-    #   fix TODO for MSG-type
+    #   fix TODO for MSG-type/MSG-len
     # TODO FTR validation: calculate TP/FP/FN ==> P/R per protocol and per type
 
 

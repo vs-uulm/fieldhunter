@@ -1,8 +1,22 @@
+import os, csv, logging
+from typing import Any
+from collections import Counter
 
 from nemere import MessageComparator
 
 from fieldhunter.inference.fieldtypes import *
 
+
+def csvAppend(reportFolder: str, fileName: str, header: List[str], rows: Iterable[Iterable[Any]]):
+    csvpath = os.path.join(reportFolder, fileName + '.csv')
+    csvWriteHead = False if os.path.exists(csvpath) else True
+
+    print('Write statistics to {}...'.format(csvpath))
+    with open(csvpath, 'a') as csvfile:
+        statisticscsv = csv.writer(csvfile)
+        if csvWriteHead:
+            statisticscsv.writerow(header)
+        statisticscsv.writerows(rows)
 
 
 class FieldTypeReport(object):
@@ -56,4 +70,36 @@ class GroundTruth(object):
         Accumulator.typelabel: []
     }
 
+    def __init__(self, comparator:MessageComparator, endianness: str = "big"):
+        self._comparator = comparator
+        self._endianness = endianness
+        logging.getLogger(__name__).setLevel(logging.DEBUG)
 
+    def entropyPerField(self, fieldname: str):
+        """Collect true fields values and calculate their entropy for the current trace."""
+        fieldsValues = [bytes.fromhex(hexval) for hexval in self._comparator.lookupValues4FieldName(fieldname)]
+        fieldLengths = Counter(len(bv) for bv in fieldsValues)
+        mostCommonLen = fieldLengths.most_common(1)[0][0]  # should normally be a constant value for this kind of fields
+        logging.getLogger(__name__).debug(f"Field lengths of {fieldname}: {repr(fieldLengths)}")
+        if len(fieldsValues) > 0:
+            entropy = drv.entropy(intsFromNgrams(fieldsValues, self._endianness)) / (mostCommonLen * 8)
+        else:
+            entropy = numpy.nan
+        return len(fieldsValues), entropy
+
+    def typeAndLenEntropies(self):
+        """
+        Collect MSGtype/MSGlen true fields according to GroundTruth.fieldtypes[MSGtype.typelabel/MSGlen.typelabel]
+
+        :return: list of lists of "field name", "type label", "sample count", and "entropy"
+        """
+        entropyList = list()
+        for typelabel in [MSGtype.typelabel, MSGlen.typelabel]:
+            for fieldname in GroundTruth.fieldtypes[typelabel]:
+                # for each field name calculate entropy
+                entropyList.append([
+                    fieldname,
+                    typelabel,
+                    *self.entropyPerField(fieldname)
+                ])
+        return entropyList
