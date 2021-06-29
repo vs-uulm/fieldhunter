@@ -1,8 +1,11 @@
 import os, csv, logging
 from typing import Any
-from collections import Counter
 
+from openpyxl import Workbook, utils
+
+from nemere.inference.segments import MessageSegment
 from nemere.validation.dissectorMatcher import MessageComparator
+from openpyxl.worksheet.worksheet import Worksheet
 
 from fieldhunter.inference.fieldtypes import *
 
@@ -23,14 +26,29 @@ class FieldTypeReport(object):
 
     headers = ["hexbytes", "segment offset", "segment end",
                "overlap ratio", "overlap index", "overlap offset", "overlap end", "overlap value",
-               "message date", "message type", "field name", "field type"]
+               "message date", "message type", "field name", "field type", "TP/FP", "isVisible"]
+    # (column isVisible could also be called: "not hidden by other type")
 
-    def __init__(self, fieldtype: FieldType, comparator: MessageComparator):
+    overviewHeaders = [
+        "field type", "FN", "FP", "TP", "P", "R"
+    ]
+
+    def __init__(self, fieldtype: FieldType, comparator: MessageComparator,
+                 segmentedMessages: Dict[AbstractMessage, List[MessageSegment]] = None):
         self._fieldtype = fieldtype
         self._comparator = comparator
+        self._segmentedMessages = segmentedMessages
 
     def lookupOverlap(self):
+        """
+        Lookup the overlap with the ground truth for all segments inferred for the given FieldHunter field type.
 
+        :param segmentedMessages: Optional Dict of segmented messages to check whether another field type got
+            precedence for single inference instances. see fieldhunter.inference.fieldtypes#precedence and
+            fieldhunter.inference.common#segmentedMessagesAndSymbols
+        :return: table (list of lists) of statistics for each inferred segment from field type, according to the
+            columns given in FieldTypeReport#headers.
+        """
         tabdata = list()
 
         for seg in (seg for msgsegs in self._fieldtype.segments for seg in msgsegs if msgsegs):
@@ -39,23 +57,52 @@ class FieldTypeReport(object):
             messagetype, fieldname, fieldtype = self._comparator.lookupField(seg)
             overlapValue = "'" + seg.message.data[overlapOffset:overlapEnd].hex() + "'"
 
+            # determine what is a TP/FP using GroundTruth
+            tpfp = fieldname in GroundTruth.fieldtypes[self.typelabel]
+
+            # check the precedence of multiple overlapping inferred fields
+            isVisible = seg in chain.from_iterable(self._segmentedMessages.values())\
+                if self._segmentedMessages is not None else "n/a"
+
             tabdata.append(["'" + seg.bytes.hex() + "'", seg.offset, seg.nextOffset,
                             overlapRatio, overlapIndex, overlapOffset, overlapEnd, overlapValue,
-                            seg.message.date, messagetype, fieldname, fieldtype])
-
-            # TODO determine what is a TP/FP using GroundTruth
-            # TODO incorporate the precedence of multiple overlapping inferred fields (column: "hidden by other type")
-            #
-
+                            seg.message.date, messagetype, fieldname, fieldtype, tpfp, isVisible])
         return tabdata
 
     @property
     def typelabel(self):
+        """The label for the field type this report is generated for."""
         return self._fieldtype.typelabel
 
-    # TODO write to file
+    def countTrueOccurrences(self):
+        counter = 0
+        for fieldname in GroundTruth.fieldtypes[self.typelabel]:
+            counter += len(self._comparator.lookupValues4FieldName(fieldname))
+        return counter
 
-
+    def addXLworksheet(self, workbook: Workbook, overview: str=None):
+        """Add data as worksheet to a openpyxl workbook. The caller needs to take take to write to file afterwards."""
+        worksheet = workbook.create_sheet(self.typelabel)
+        worksheet.append(FieldTypeReport.headers)
+        for row in self.lookupOverlap():
+            worksheet.append(row)
+        if overview is not None:
+            try:
+                ovSheet = workbook[overview]  # type: Worksheet
+                currentRow = ovSheet.max_row + 1
+                tpCoord = f"{utils.get_column_letter(4)}{currentRow}"
+                ovSheet.append([
+                    self.typelabel,
+                    f"={self.countTrueOccurrences()} - {tpCoord}", # "FN"
+                    f"=COUNTIF({utils.quote_sheetname(self.typelabel)}!M:M,FALSE())", # "=FP"
+                    f"=COUNTIF({utils.quote_sheetname(self.typelabel)}!M:M,TRUE())",  # "=TP"
+                    f"=D{currentRow}/(D{currentRow}+C{currentRow})", # P
+                    f"=D{currentRow}/(D{currentRow}+B{currentRow})", # R
+                ])
+            except KeyError:
+                logging.getLogger(__name__).info("Overview sheet with title", overview, "not found. "
+                                                 "Not writing overview.")
+        return workbook
 
 
 class GroundTruth(object):

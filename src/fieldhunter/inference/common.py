@@ -2,9 +2,10 @@
 Common handling of inference intermediates or results.
 """
 
-from typing import Iterable, List
+from typing import Iterable, List, Tuple, Dict, Union
 
 from netzob.Model.Vocabulary.Messages.AbstractMessage import AbstractMessage
+from netzob.Model.Vocabulary.Symbol import Symbol
 
 from fieldhunter.inference.fieldtypes import FieldType
 from nemere.inference.formatRefinement import isOverlapping
@@ -13,7 +14,8 @@ from nemere.inference.segments import TypedSegment, MessageSegment
 from nemere.inference.analyzers import Value
 
 
-def segmentedMessagesAndSymbols(typedFields: Iterable[FieldType], messages: List[AbstractMessage]):
+def segmentedMessagesAndSymbols(typedFields: Iterable[FieldType], messages: List[AbstractMessage]) \
+        -> Tuple[Dict[AbstractMessage, List[MessageSegment]], List[Symbol]]:
     # noinspection PyProtectedMember
     """
     Consolidate the inferred fields into segmented messages and additionally into symbols.

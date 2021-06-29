@@ -3,7 +3,9 @@ Only implements FH's binary message handling using n-grams (not textual using de
 """
 
 from argparse import ArgumentParser
-from time import time
+from time import time, strftime
+from openpyxl import Workbook
+from os.path import join, exists
 
 # noinspection PyUnresolvedReferences
 from tabulate import tabulate
@@ -13,7 +15,7 @@ from pprint import pprint
 import IPython
 
 from nemere.utils.loader import SpecimenLoader
-from nemere.utils.evaluationHelpers import StartupFilecheck
+from nemere.utils.evaluationHelpers import StartupFilecheck, reportFolder
 from nemere.utils.reportWriter import writeReport
 from nemere.validation.dissectorMatcher import MessageComparator, DissectorMatcher
 
@@ -32,15 +34,17 @@ if __name__ == '__main__':
     parser.add_argument('-i', '--interactive', help='open ipython prompt after finishing the analysis.',
                         action="store_true")
     # TODO remove these options: FH requires TCP/UDP over IP (FH, Section 6.6)
-    parser.add_argument('-l', '--layer', type=int, default=2,
-                        help='Protocol layer relative to IP to consider. Default is 2 layers above IP '
-                             '(typically the payload of a transport protocol).')
-    parser.add_argument('-r', '--relativeToIP', default=True, action='store_false')
+    # parser.add_argument('-l', '--layer', type=int, default=2,
+    #                     help='Protocol layer relative to IP to consider. Default is 2 layers above IP '
+    #                          '(typically the payload of a transport protocol).')
+    # parser.add_argument('-r', '--relativeToIP', default=True, action='store_false')
     args = parser.parse_args()
+    layer = 2
+    relativeToIP = True
 
     filechecker = StartupFilecheck(args.pcapfilename)
 
-    specimens = SpecimenLoader(args.pcapfilename, layer=args.layer, relativeToIP = args.relativeToIP)
+    specimens = SpecimenLoader(args.pcapfilename, layer = layer, relativeToIP = relativeToIP)
     # noinspection PyTypeChecker
     messages = list(specimens.messagePool.keys())  # type: List[L4NetworkMessage]
     flows = Flows(messages)
@@ -100,7 +104,7 @@ if __name__ == '__main__':
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
     nontrivialSymbols = [sym for sym in symbols if len(sym.fields) > 1]
-    comparator = MessageComparator(specimens, layer=args.layer, relativeToIP=args.relativeToIP)
+    comparator = MessageComparator(specimens, layer=layer, relativeToIP=relativeToIP)
     print("Dissection complete.")
     comparator.pprintInterleaved(nontrivialSymbols)
     print(f"\n   + {len(symbols)-len(nontrivialSymbols)} messages without any inferred fields.")
@@ -116,25 +120,26 @@ if __name__ == '__main__':
     # # # TODO Working area
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
+    # FTR validation: calculate TP/FP/FN ==> P/R per protocol and per type
+    ovTitle = "Overview"
+    infieldWorkbook = Workbook()
+    infieldWorkbook.active.title = ovTitle
+    ovSheet = infieldWorkbook[ovTitle]
+    ovSheet.append(FieldTypeReport.overviewHeaders)
     for infields in sortedInferredTypes:
-        infieldreport = FieldTypeReport(infields, comparator)
-        print(f"\nReport for {infieldreport.typelabel}:\n" + tabulate(
-            infieldreport.lookupOverlap(), headers=infieldreport.headers ))
-    # msglenfields
-    # msgtypefields
-    # hostidfields
-    # sessionidfields
-    # transidfields
-    # accumulatorfields
-
-    # TODO finalize a "literal" implementation:
-    #   fix TODO for MSG-type/MSG-len
-    # TODO FTR validation: calculate TP/FP/FN ==> P/R per protocol and per type
-
-
-
-
-
+        infieldReport = FieldTypeReport(infields, comparator)
+        infieldReport.addXLworksheet(infieldWorkbook, ovTitle)
+    infieldFilename = join(reportFolder,
+                           f"FieldTypeReport_{filechecker.pcapstrippedname}_{strftime('%Y%m%d-%H%M%S')}.xlsx")
+    if not exists(infieldFilename):
+        print("Write field type report to", infieldFilename)
+        infieldWorkbook.save(infieldFilename)
+    else:
+        print("Could not write", infieldFilename, "- File exists")
+        for worksheet in infieldWorkbook.worksheets:
+            headers = worksheet.rows[0]
+            cells = worksheet.rows[1:]
+            print( f"\nReport for {worksheet.title}:\n" + tabulate(cells, headers=headers) )
 
 
 
@@ -145,7 +150,12 @@ if __name__ == '__main__':
     #  define a collection of base classes for the literal and improved implementations,
     #  copy/subclass the fieldtypes module and address the todos there
 
-
+    # msglenfields
+    # msgtypefields
+    # hostidfields
+    # sessionidfields
+    # transidfields
+    # accumulatorfields
 
     # interactive
     if args.interactive:
