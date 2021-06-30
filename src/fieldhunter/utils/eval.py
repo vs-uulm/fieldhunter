@@ -91,6 +91,8 @@ class FieldTypeReport(object):
         worksheet.append(FieldTypeReport.headers)
         for row in self.lookupOverlap():
             worksheet.append(row)
+        onlyVisible = f",{utils.quote_sheetname(self.typelabel)}!N:N,TRUE()" \
+            if self._segmentedMessages is not None else ""
         if overview is not None:
             try:
                 ovSheet = workbook[overview]  # type: Worksheet
@@ -99,8 +101,8 @@ class FieldTypeReport(object):
                 ovSheet.append([
                     self.typelabel,
                     f"={self.countTrueOccurrences()} - {tpCoord}", # "FN"
-                    f"=COUNTIF({utils.quote_sheetname(self.typelabel)}!M:M,FALSE())", # "=FP"
-                    f"=COUNTIF({utils.quote_sheetname(self.typelabel)}!M:M,TRUE())",  # "=TP"
+                    f"=COUNTIFS({utils.quote_sheetname(self.typelabel)}!M:M,FALSE(){onlyVisible})", # "=FP"
+                    f"=COUNTIFS({utils.quote_sheetname(self.typelabel)}!M:M,TRUE(){onlyVisible})",  # "=TP"
                     f"=D{currentRow}/(D{currentRow}+C{currentRow})", # P
                     f"=D{currentRow}/(D{currentRow}+B{currentRow})", # R
                 ])

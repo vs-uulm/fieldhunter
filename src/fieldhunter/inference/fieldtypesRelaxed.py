@@ -16,200 +16,30 @@ from netzob.Model.Vocabulary.Messages.AbstractMessage import AbstractMessage
 from netzob.Model.Vocabulary.Messages.L2NetworkMessage import L2NetworkMessage
 from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
 
-from nemere.inference.analyzers import Value
 from nemere.inference.segments import TypedSegment
-from tabulate import tabulate
 
 from fieldhunter.utils.base import qrAssociationCorrelation, verticalByteMerge, mutualInformationNormalized, \
     list2ranges, Flows, NgramIterator, iterateSelected, intsFromNgrams, \
     ngramIsOverlapping, pyitNgramEntropy
+from fieldhunter.inference.fieldtypes import NonConstantNonRandomEntropyFieldType, FieldType, Accumulator
+import fieldhunter.inference.fieldtypes as fieldtypes
 
 
 logging.getLogger(__name__).setLevel(logging.DEBUG)
 
 
-class FieldType(ABC):
+class MSGtype(fieldtypes.MSGtype):
     """
-    Generic, abstract base class for field types. Holds segments and a type label for the inferred fields.
+    Relaxed version of Message type (MSG-Type) inference (FH, Section 3.2.1, Fig. 3 left).
 
-    For DocTest example see fieldhunter.inference.common#segmentedMessagesAndSymbols()
+    see .fieldtypes.MSGtype
     """
-    typelabel = None
-
-    def __init__(self):
-        self._segments = list()
-
-    @property
-    def segments(self) -> List[List[TypedSegment]]:
-        """
-        :return: Final result as segments that are of the inferred type.
-        """
-        return self._segments
-
-    @classmethod
-    def _posLen2segments(cls, messages: List[L2NetworkMessage],
-                         posLen: Union[Iterable[Tuple[int, int]],ItemsView[int, int]]) \
-            -> List[List[TypedSegment]]:
-        """
-        Generate Segments from (remaining) field ranges.
-
-        For DocTest example see fieldhunter.inference.common#segmentedMessagesAndSymbols()
-
-        :param messages: Messages to generate n-grams to correlate to.
-        :param posLen: List of start-length tuples to create segments for from each message.
-        :return: Lists of segments per message generated from the posLen parameter.
-        """
-        segments = list()
-        for message in messages:
-            mval = Value(message)
-            segs4msg = list()
-            for start, length in posLen:
-                # check if boundaries fit into message
-                if start + length <= len(mval.values):
-                    segs4msg.append(TypedSegment(mval, start, length, cls.typelabel))
-            segments.append(segs4msg)
-        return segments
+    # FH, Sec. 3.2.1 says 0.8, but that leaves no candidates for our NTP traces
+    # Reduces TP and FP for SMB 100.
+    causalityThresh = 0.7
 
 
-class NonConstantNonRandomEntropyFieldType(FieldType, ABC):
-    """
-    Abstract class for inferring field types using entropy of n-gram values
-    where the entropy may neither be 0 (constant n-gram values)
-    nor equal or greater than a threshold (random n-gram values).
-    """
-    # Value for entropyThresh not given in FH!
-    # We use a constant entropyThresh of 0.4 determined by own empirics (results of /src/trace_statistics.py in
-    #   nemesys-reports/NEMEFTR/fieldhunter/typeAndLengthEntropies.ods)
-    entropyThresh = 0.4
-
-    @classmethod
-    def entropyFilteredOffsets(cls, messages: List[AbstractMessage], n: int):
-        """
-        Find offsets of n-grams (with the same offset in different messages of the list), that are not constant and not
-        random, i. e., that have a entropy > 0 and < x (threshold)
-
-        FH, Section 3.2.1
-
-        :param messages: Messages to generate n-grams from
-        :param n: The $n$ in n-gram
-        :return: Returns a list of offsets that have non-constant and non-random (below entropyThresh) entropy.
-        """
-        entropy = pyitNgramEntropy(messages, n)
-        ePo = [(offset, entropy) for offset, entropy in enumerate(entropy)]
-        logging.getLogger(__name__).debug(f"Entropies per offset:\n{tabulate(ePo)}")
-        return [offset for offset, entropy in enumerate(entropy) if 0 < entropy < cls.entropyThresh]
-
-
-class MSGtype(NonConstantNonRandomEntropyFieldType):
-    """
-    Message type (MSG-Type) inference (FH, Section 3.2.1, Fig. 3 left).
-    This type heuristic is based on the mutual information shared between n-grams at the same offset in the query and
-    response messages. This assumes that message type fields are at the same position in query and response. Moreover,
-    fields that solely denote whether a message is a query or a response, yield a undefined mutual information and thus
-    cannot be detected as fields denoting a message type.
-
-    The properties of this class provide access to intermediate and final results.
-    """
-    typelabel = "MSG-Type"
-    causalityThresh = 0.8
-
-    def __init__(self, flows: Flows):
-        super().__init__()
-
-        logger = logging.getLogger(__name__)
-        c2s, s2c = flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
-
-        # discard constant and random offsets
-        self._c2sEntropyFiltered = type(self).entropyFilteredOffsets(c2s, 1)
-        self._s2cEntropyFiltered = type(self).entropyFilteredOffsets(s2c, 1)
-        logger.info(f"c2sEntropyFiltered offsets: {self.c2sEntropyFiltered}")
-        logger.info(f"s2cEntropyFiltered offsets: {self.s2cEntropyFiltered}")
-
-        # compute Q->R association
-        mqr = flows.matchQueryResponse()
-        if len(mqr) < 2:
-            # not enough query response pairs to continue analysis: create valid empty instance state and return
-            self._qrCausality = dict()
-            self._filteredCausality = dict()
-            self._mergingOffsets = list()
-            self._mergedCausality = dict()
-            self._msgtypeRanges = list()
-            self._segments = list()
-            return
-        # Mutual information
-        self._qrCausality = qrAssociationCorrelation(mqr)
-        # filter: only if offset is in c2sEntropyFiltered/s2cEntropyFiltered and the causality is greater than the causalityThresh
-        self._filteredCausality = {offset: self.qrCausality[offset] for offset in
-                             set(self.c2sEntropyFiltered).intersection(self.s2cEntropyFiltered)
-                             if self.qrCausality[offset] > type(self).causalityThresh}
-        # filteredCausality are offsets of MSG-Type candidate n-grams
-        logger.info(f"filtered causality: {sorted(self.filteredCausality.items())}")
-
-        # Merge n-grams above causality threshold and check correlation
-        self._mergingOffsets = list()
-        for offset in sorted(self.filteredCausality.keys()):
-            self._mergingOffsets.append(offset)
-            qMergedField, rMergedField = verticalByteMerge(mqr, self.offsets)
-            mergedCausality = mutualInformationNormalized(qMergedField, rMergedField)
-            if mergedCausality <= type(self).causalityThresh:
-                # Filter problematic n-grams
-                self._mergingOffsets.pop()
-        # re-calculate in case the last iteration removed a problematic n-gram
-        qMergedField, rMergedField = verticalByteMerge(mqr, self.offsets)
-        self._mergedCausality = mutualInformationNormalized(qMergedField, rMergedField)
-        logger.info(f"mergedCausality: {self.mergedCausality}")
-        logger.info(f"  mergedOffsets: {self._mergingOffsets}")
-        logger.info(f"   from offsets: {sorted(self.filteredCausality.keys())}")
-
-        # create segments from bytes in mergingOffsets
-        self._msgtypeRanges = list2ranges(self.offsets)
-        self._segments = type(self)._posLen2segments(c2s + s2c, self._msgtypeRanges)
-
-
-    @property
-    def s2cEntropyFiltered(self) -> List[int]:
-        """
-        :return: The offsets for which the vertical entropies of all the server to client messages are
-            greater than zero and less than MSGtype.entropyThresh
-        """
-        return self._s2cEntropyFiltered
-
-    @property
-    def c2sEntropyFiltered(self) -> List[int]:
-        """
-        :return: The offsets for which the vertical entropies of all the client to server messages are
-            greater than zero and less than MSGtype.entropyThresh
-        """
-        return self._c2sEntropyFiltered
-
-    @property
-    def qrCausality(self) -> Dict[int,float]:
-        return self._qrCausality
-
-    @property
-    def filteredCausality(self) -> Dict[int,float]:
-        return self._filteredCausality
-
-    @property
-    def mergedCausality(self) -> List[int]:
-        return self._mergedCausality
-
-    @property
-    def offsets(self):
-        """
-        :return: Final result as individual byte offsets of offsets that are MSG-Types
-        """
-        return self._mergingOffsets
-
-    @property
-    def ranges(self) -> List[Tuple[int, int]]:
-        """
-        :return: Final result as ranges of offsets that are MSG-Types
-        """
-        return self._msgtypeRanges
-
-
-class MSGlen(NonConstantNonRandomEntropyFieldType):
+class MSGlen(fieldtypes.MSGlen):
     """
     Message length (MSG-Len) inference (FH, Section 3.2.2, Fig. 3 center).
     Application message length, linearly correlates with message size.
@@ -218,12 +48,12 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
     """
     typelabel = "MSG-Len"
     # coefficient threshold 0.6 (FH, Section 3.2.2)
-    minCorrelation = 0.6
+    minCorrelation = 0.6  # TODO many FPs (TP good!)
     # MSG-Len hypothesis threshold 0.9 (FH, Section 3.2.2)
     lenhypoThresh = 0.9
 
     def __init__(self, flows: Flows):
-        super().__init__()
+        super(NonConstantNonRandomEntropyFieldType, self).__init__()
 
         self._msgDirection = list()
         c2s, s2c = flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
@@ -231,14 +61,6 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
         #   it might rather be useful to separate message types (distinct formats) in this manner.
         for direction in [c2s, s2c]:
             self._msgDirection.append(MSGlen.Direction(direction))
-
-    @property
-    def acceptedCandidatesPerDir(self) -> List[Dict[int, int]]:
-        return [mldir.acceptedCandidates for mldir in self._msgDirection]
-
-    @property
-    def segments(self) -> List[List[TypedSegment]]:
-        return list(chain.from_iterable([mldir.segments for mldir in self._msgDirection]))
 
     class Direction(object):
         """
@@ -393,21 +215,6 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
         @property
         def segments(self):
             return self._segments
-
-    @staticmethod
-    def checkPrecedence(offset: int, n: int, ngrams: Iterable[Tuple[int, int]]):
-        """
-        Has n-gram at offset precedence over all n-grams in ngrams?
-
-        :param offset:
-        :param n:
-        :param ngrams: offset and n for a list of n-grams
-        :return:
-        """
-        for o1, n1 in ngrams:
-            if ngramIsOverlapping(offset, n, o1, n1):
-                return False
-        return True
 
 
 class CategoricalCorrelatedField(FieldType,ABC):
@@ -755,139 +562,6 @@ class TransID(FieldType):
         merge and filter candidates by minimum length
         """
         return [ol for ol in list2ranges(consistentCandidates) if ol[1] >= cls.minFieldLength]
-
-
-class Accumulator(FieldType):
-    """
-    Accumulator inference (FH, Section 3.2.6)
-
-    "Accumulators are fields that have increasing values over consecutive message within the same conversation."
-        (FH, Sec. 3.2.6)
-    """
-    typelabel = 'Accumulator'
-
-    # TODO also support little endian (for our test traces, it was irrelevant)
-    endianness = 'big'
-    ns = (8, 4, 3, 2)
-    deltaEntropyThresh = 0.8  # Not given in FH, own empirics: 0.2
-
-    def __init__(self, flows: Flows):
-        super(Accumulator, self).__init__()
-
-        # c2s and s2c independently
-        self._c2sConvs = {key: list(sorted(conv, key=lambda m: m.date))
-                          for key, conv in flows.c2sInConversations().items()}
-        self._c2sDeltas = type(self).deltas(self._c2sConvs)
-        self._c2sDeltaEntropies = type(self).entropies(self._c2sDeltas)
-
-        self._s2cConvs = {key: list(sorted(conv, key=lambda m: m.date))
-                          for key, conv in flows.s2cInConversations().items()}
-        self._s2cDeltas = type(self).deltas(self._c2sConvs)
-        self._s2cDeltaEntropies = type(self).entropies(self._s2cDeltas)
-
-        # print('c2sDeltaEntropies (n: offset: value)')
-        # pprint(c2sDeltaEntropies)
-        # print('s2cDeltaEntropies (n: offset: value)')
-        # pprint(s2cDeltaEntropies)
-
-        c2s, s2c = flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
-        self._segments = self._posLen2segments(c2s, type(self).filter(self._c2sDeltaEntropies)) + \
-                         self._posLen2segments(s2c, type(self).filter(self._s2cDeltaEntropies))
-
-    @classmethod
-    def deltas(cls, conversations: Dict[tuple, List[AbstractMessage]]) -> Dict[int, Dict[int, List[int]]]:
-        """
-        Value deltas per offset and n over all message-pairs of all conversations.
-
-        :param conversations: Conversations need to be sorted in chronological order for the message pairs to produce
-            meaningful deltas.
-        :return: Pairwise deltas of values per offset and n-gram size.
-        """
-        deltas = dict()
-        for key, conv in conversations.items():
-            if len(conv) > 2:
-                continue
-            # subsequent messages per direction per conversation
-            for msgA, msgB in zip(conv[:-1], conv[1:]):
-                # iterate n-grams' n = 8, 4, 3, 2
-                # combined from Sec. 3.1.2: n=32, 24, 16 bits (4, 3, 2 bytes)
-                #       and see Sec. 3.2.6: n=64, 32, 16 bits (8, 4, 2 bytes)
-                for n in cls.ns:
-                    if n not in deltas:
-                        deltas[n] = dict()
-                    for offset, (ngramA, ngramB) in enumerate(zip(NgramIterator(msgA, n), NgramIterator(msgB, n))):
-                        # calculate delta between n-grams (n and offset identical) two subsequent messages
-                        # TODO test support little endian
-                        delta = int.from_bytes(ngramB, cls.endianness) - int.from_bytes(ngramA, cls.endianness)
-                        if offset not in deltas[n]:
-                            deltas[n][offset] = list()
-                        deltas[n][offset].append(delta)
-        return deltas
-
-    @classmethod
-    def entropies(cls, deltas: Dict[int, Dict[int, List[int]]]) -> Dict[int, Dict[int, float]]:
-        """
-        For positive delta values with enough samples to calculate a meaningful entropy (>= 2),
-        calculate the normalized entropies of the "compressed" (ln()) deltas.
-
-        :param deltas: Pairwise deltas between values of subsequent messages in conversations
-            at the same offset and with the same length (n): Dict[n, Dict[offset, delta] ].
-        :return: Entropies of deltas per n-gram length and offset: Dict[n, Dict[offset, entropy] ].
-        """
-        lndeltas = dict()
-        for n, offdel in deltas.items():
-            lndeltas[n] = dict()
-            for offset, dlts in offdel.items():
-                # require more than 1 value to calculate a meaningful entropy
-                if len(dlts) < 2:
-                    continue
-                npdlts = numpy.array(dlts)
-                # require all deltas to be positive
-                if any(npdlts <= 0):
-                    continue
-                # compress deltas by ln
-                lndeltas[n][offset] = numpy.log(numpy.array(dlts))
-        deltaEntropies = {n: {offset: drv.entropy(dlts)/numpy.log(n*8)
-                              for offset, dlts in offdel.items()} for n, offdel in lndeltas.items()}
-        return deltaEntropies
-
-    @classmethod
-    def filter(cls, deltaEntropies: Dict[int, Dict[int, float]]) -> List[Tuple[int, int]]:
-        """
-        Filter the entropies per n-gram size and offset to yield unambiguos candidates for accumulators.
-        Filtering criteria are:
-            * "fairly constant": relatively low entropy
-            * previous filtering left over offsets for a n
-            * prefer larger ns and smaller offsets if candidates are overlapping
-
-        :param deltaEntropies: Entropies of deltas per n-gram length and offset: Dict[n, Dict[offset, entropy] ].
-        :return: List of offsets and lengths that are valid field candidates.
-        """
-        # "fairly constant": relatively low entropy -> threshold (value not given in FH)
-        filteredDE = {n: {offs: entr for offs, entr in offsdelt.items() if entr < cls.deltaEntropyThresh}
-                         for n, offsdelt in deltaEntropies.items()}
-        candidates = dict()  # type: Dict[int, List[int]]
-        for n in reversed(sorted(filteredDE.keys())):
-            # no offsets for this n-gram size
-            if len(filteredDE[n]) == 0:
-                continue
-            for offset in sorted(filteredDE[n].keys()):
-                # precedence for larger ns and smaller offsets: thats those we already found and added to candidates
-                overlapps = False
-                for candN, candOffs in candidates.items():
-                    for candO in candOffs:
-                        if ngramIsOverlapping(offset, n, candO, candN):
-                            overlapps = True
-                            break
-                    if overlapps:
-                        break
-                if overlapps:
-                    continue
-                if not n in candidates:
-                    candidates[n] = list()
-                candidates[n].append(offset)
-        posLen = [(o, n) for n, offsets in candidates.items() for o in offsets]
-        return posLen
 
 
 # Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence
