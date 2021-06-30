@@ -230,7 +230,7 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
         # per direction - for MSG-Len this is pointless, but the paper says to do it.
         #   it might rather be useful to separate message types (distinct formats) in this manner.
         for direction in [c2s, s2c]:
-            self._msgDirection.append(MSGlen.Direction(direction))
+            self._msgDirection.append(type(self).Direction(direction))
 
     @property
     def acceptedCandidatesPerDir(self) -> List[Dict[int, int]]:
@@ -353,7 +353,7 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
                         continue
                     # MSG-len hypothesis test - for ALL message pairs with different lengths (FH, 3.2.2 last paragraph)
                     #   - for the n-grams from this offset - keep only those offsets, where the threshold of pairs holds
-                    solutionAcceptable = dict()  # type: Dict[Tuple[AbstractMessage, AbstractMessage], True]
+                    solutionAcceptable = dict()  # type: Dict[Tuple[AbstractMessage, AbstractMessage], bool]
                     Xes = list()
                     for l1, l2 in combinations(self._msgbylen.keys(),2):
                         for msg0, msg1 in product(self._msgbylen[l1], self._msgbylen[l2]):
@@ -370,20 +370,25 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
                             except numpy.linalg.LinAlgError:
                                 print("LinAlgError occurred. Solution considered as non-acceptable.")
                                 solutionAcceptable[(msg0, msg1)] = False
-                    acceptCount = Counter(solutionAcceptable.values())
-                    if acceptCount[True]/len(acceptCount) > MSGlen.lenhypoThresh:
+                    Xarray = numpy.array(Xes)
+                    logging.getLogger(__name__).debug(f"Checking candidate with n = {n} at offset {offset}.")
+                    if type(self)._candidateIsAcceptable(solutionAcceptable, Xarray):
                         acceptedCandidates[offset] = n
-                        acceptedX[offset] = Xes
-                        # TODO FH does not require this, but the values in A and B should be equal within,
-                        #  so that a and b is one scalar value each. Otherwise we end up with lots of FPs.
-                        #  Example: In SMB, the 'Msg. Len. Model Parameters' (a,b) == [1., 4.]
-                        #  of the 4-gram at offset 0, 4 is nbss.length, i. e., a TP!
-                        #  Offsets 16 and 22 are FP, but with diverging A and B vectors.
-                        #  Thus, requiring that a and b are scalars here would help.
-                        #  Another example: In DNS, the beginning of the queried name is a FP (probably due to DNS'
-                        #  subdomain numbered separator scheme).
+                        acceptedX[offset] = Xarray
             self._acceptedCandidates = acceptedCandidates
-            self._acceptedX = {offset: numpy.array(aX) for offset, aX in acceptedX.items()}
+            self._acceptedX = acceptedX
+
+        @staticmethod
+        def _candidateIsAcceptable(solutionAcceptable: Dict[Tuple[AbstractMessage, AbstractMessage], bool],
+                                   Xarray: numpy.ndarray):
+            """
+            Count the message pairs for which the solution is acceptable according to the MSG-len hypothesis test.
+
+            :param solutionAcceptable: results of the the MSG-len hypothesis test for the Cartesian product of messages.
+            :return: Whether this candidate is acceptable using MSGlen.lenhypoThresh.
+            """
+            acceptCount = Counter(solutionAcceptable.values())
+            return bool(acceptCount[True]/len(acceptCount) > MSGlen.lenhypoThresh)
 
         @property
         def acceptedCandidates(self) -> Dict[int, int]:
@@ -481,42 +486,6 @@ class HostID(CategoricalCorrelatedField):
     """
     Host identifier (Host-ID) inference (FH, Sec. 3.2.3)
     Find n-gram that is strongly correlated with IP address of sender.
-
-
-    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-    # # # # Investigate low categoricalCorrelation for all but one byte within an address field (see NTP and DHCP).
-    # # # # According to NTP offset 12 (REF ID, often DST IP address) and DHCP offsets (12, 17, and) 20 (IPs)
-    # # # # this works in principle, but if the n-gram is too short the correlation gets lost for some n-grams.
-    # # print(tabulate(zip(*[hostidfields.categoricalCorrelation]), showindex="always"))
-    # # from matplotlib import pyplot
-    # # pyplot.bar(range(len(hostidfields.categoricalCorrelation)), hostidfields.categoricalCorrelation)
-    # # pyplot.show()
-    # # # sum([msg.data[20:24] == bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
-    # # # sum([int.from_bytes(messages[m].data[20:24], "big") == srcs[m] for m in range(len(messages))])
-    # # # # While the whole bootp.ip.server [20:24] correlates nicely to the IP address, single n-grams don't.
-    # # serverIP = [(int.from_bytes(messages[m].data[20:24], "big"), srcs[m]) for m in range(len(messages))]
-    # # serverIP0 = [(messages[m].data[20], srcs[m]) for m in range(len(messages))]
-    # # serverIP1 = [(messages[m].data[21], srcs[m]) for m in range(len(messages))]
-    # # serverIP2 = [(messages[m].data[22], srcs[m]) for m in range(len(messages))]
-    # # serverIP3 = [(messages[m].data[23], srcs[m]) for m in range(len(messages))]
-    # # # nsp = numpy.array([sip for sip in serverIP])
-    # # # # The correlation is perfect, if null values are omitted
-    # # nsp = numpy.array([sip for sip in serverIP if sip[0] != 0])   #  and sip[0] == sip[1]
-    # # # nsp0 = numpy.array(serverIP0)
-    # # # nsp1 = numpy.array(serverIP1)
-    # # # nsp2 = numpy.array(serverIP2)
-    # # # nsp3 = numpy.array(serverIP3)
-    # # nsp0 = numpy.array([sip for sip in serverIP0 if sip[0] != 0])
-    # # nsp1 = numpy.array([sip for sip in serverIP1 if sip[0] != 0])
-    # # nsp2 = numpy.array([sip for sip in serverIP2 if sip[0] != 0])
-    # # nsp3 = numpy.array([sip for sip in serverIP3 if sip[0] != 0])
-    # # for serverSrcPairs in [nsp, nsp0, nsp1, nsp2, nsp3]:
-    # #     print(drv.information_mutual(serverSrcPairs[:, 0], serverSrcPairs[:, 1]) / drv.entropy_joint(serverSrcPairs.T))
-    # # # # TODO This is no implementation error, but raises doubts about the Host-ID description completeness:
-    # # # #  Probably it does not mention an Entropy filter, direction separation, or - most probably -
-    # # # #  an iterative n-gram size increase (see MSGlen).
-    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
     """
     typelabel = 'Host-ID'
 
@@ -545,9 +514,6 @@ class SessionID(CategoricalCorrelatedField):
 
     Most of FH, Section 3.2.4, refers to Host-ID, so we use all missing details from there and reuse the implementation.
     The only difference are the values to correlate (see #_values2correlate2())
-
-    # # TODO Problem similar to Host-ID leads to same bad quality.
-    # # Moreover, Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence.
     """
     typelabel = 'Session-ID'
 
@@ -673,18 +639,12 @@ class TransID(FieldType):
         for key, conv in self._flows.c2sInConversations().items():
             # The entropy is too low if the number of specimens is low -> relative to max
             # and ignore conversations of length 1
-            # (TODO FH does not specify, but probably require even longer conversations to observe
-            #   that the ID changes for each request/reply pair?
-            #   "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
             if len(conv) <= 1:
                 continue
             self._c2sConvsEntropyFiltered[key] = type(self).entropyFilteredOffsets(conv, False)
         for key, conv in self._flows.s2cInConversations().items():
             # The entropy is too low if the number of specimens is low -> relative to max
             # and ignore conversations of length 1
-            # (TODO FH does not specify, but probably require even longer conversations to observe
-            #   that the ID changes for each request/reply pair?
-            #   "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
             if len(conv) <= 1:
                 continue
             self._s2cConvsEntropyFiltered[key] = type(self).entropyFilteredOffsets(conv, False)
@@ -699,10 +659,8 @@ class TransID(FieldType):
         s2cOffsetLists = [set(offsetlist) for offsetlist in self._s2cConvsEntropyFiltered.values()]
         self._s2cHorizontalOffsets = set.intersection(*s2cOffsetLists) if len(s2cOffsetLists) > 0 else set()
         # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _c2sConvsEntropyFiltered
-        # (TODO alternatively, deviating from FH, use the offset for each query specifically?)
         self._c2sCombinedOffsets = self._c2sHorizontalOffsets.intersection(self._c2sEntropyFiltered)
         # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _s2cConvsEntropyFiltered
-        # (TODO alternatively, deviating from FH, use the entry for each response specifically?)
         self._s2cCombinedOffsets = self._s2cHorizontalOffsets.intersection(self._s2cEntropyFiltered)
 
     def _constantQRvalues(self):
@@ -817,7 +775,7 @@ class Accumulator(FieldType):
                         deltas[n] = dict()
                     for offset, (ngramA, ngramB) in enumerate(zip(NgramIterator(msgA, n), NgramIterator(msgB, n))):
                         # calculate delta between n-grams (n and offset identical) two subsequent messages
-                        # TODO test support little endian
+                        # TODO test support little endian (for our test traces, it was irrelevant)
                         delta = int.from_bytes(ngramB, cls.endianness) - int.from_bytes(ngramA, cls.endianness)
                         if offset not in deltas[n]:
                             deltas[n][offset] = list()

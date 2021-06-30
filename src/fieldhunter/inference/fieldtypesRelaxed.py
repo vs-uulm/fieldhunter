@@ -1,5 +1,6 @@
 """
-Infer message field types exactly according to the FieldHunter paper Section 3.2
+Infer message field types according to the FieldHunter paper Section 3.2
+but with some relaxed thresholds and assumptions.
 
 TODO introduce doctests to check critical functions in inference.fieldtypes
 """
@@ -30,191 +31,67 @@ logging.getLogger(__name__).setLevel(logging.DEBUG)
 
 class MSGtype(fieldtypes.MSGtype):
     """
-    Relaxed version of Message type (MSG-Type) inference (FH, Section 3.2.1, Fig. 3 left).
+    Relaxed version of message type (MSG-Type) inference (FH, Section 3.2.1, Fig. 3 left).
 
     see .fieldtypes.MSGtype
     """
-    # FH, Sec. 3.2.1 says 0.8, but that leaves no candidates for our NTP traces
-    # Reduces TP and FP for SMB 100.
     causalityThresh = 0.7
+    """
+    FH, Sec. 3.2.1 says 0.8, but that leaves no candidates for our NTP traces
+    Reduces TP and FP for SMB 100.
+    """
 
 
 class MSGlen(fieldtypes.MSGlen):
     """
-    Message length (MSG-Len) inference (FH, Section 3.2.2, Fig. 3 center).
-    Application message length, linearly correlates with message size.
+    Relaxed version of message length (MSG-Len) inference (FH, Section 3.2.2, Fig. 3 center).
 
-    Properties enable access to intermediate and final results.
+    see .fieldtypes.MSGlen
     """
-    typelabel = "MSG-Len"
     # coefficient threshold 0.6 (FH, Section 3.2.2)
-    minCorrelation = 0.6  # TODO many FPs (TP good!)
+    minCorrelation = 0.6
     # MSG-Len hypothesis threshold 0.9 (FH, Section 3.2.2)
     lenhypoThresh = 0.9
 
     def __init__(self, flows: Flows):
         super(NonConstantNonRandomEntropyFieldType, self).__init__()
 
-        self._msgDirection = list()
-        c2s, s2c = flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
-        # per direction - for MSG-Len this is pointless, but the paper says to do it.
-        #   it might rather be useful to separate message types (distinct formats) in this manner.
-        for direction in [c2s, s2c]:
-            self._msgDirection.append(MSGlen.Direction(direction))
+        # The FH paper per direction wants to handle each direction separately, which is pointless for MSG-Len,
+        # so we place all messages in one direction object.
+        self._msgDirection = [type(self).Direction(flows.messages)]
+        # TODO It might rather be useful to separate message types (distinct formats) in this manner.
+        #   However, this requires combination with some message type classification approach. => Future Work.
 
-    class Direction(object):
-        """
-        Encapsulates direction-wise inference of MSGlen fields.
-        Roughly corresponds to either the S2C-collection or C2S-collection branch
-        depicted in the flow graph of FH, Fig. 3 center.
+    class Direction(fieldtypes.MSGlen.Direction):
 
-        Provides methods to extract different size collections, finding candidates by Pearson correlation coefficient,
-        and verifying the hypothesis of candidates denoting the length of the message.
-        """
-        # TODO also support little endian (for our test traces, it was irrelevant)
-        endianness = 'big'
+        @staticmethod
+        def _candidateIsAcceptable(solutionAcceptable: Dict[Tuple[AbstractMessage, AbstractMessage], bool],
+                                   Xarray: numpy.ndarray):
+            """
+            FH does not require that either the values in X[0]/a or X[1]/b are equal for all X in Xes.
+            Thus, different values are accepted, although a message length typically is calculated using the same
+            multiplicator X[0], even if the offset X[1] may change, so X[0] must be a scalar value.
 
-        def  __init__(self, direction: List[L4NetworkMessage]):
-            self._direction = direction
+            Otherwise we end up with lots of FPs. Examples:
+                * In SMB, the 'Msg. Len. Model Parameters' (a,b) == [1., 4.]
+                  of the 4-gram at offset 0, 4 is nbss.length, i. e., a TP!
+                  Offsets 16 and 22 are FP, but with diverging A and B vectors.
+                * Another example: In DNS, the beginning of the queried name is a FP
+                  (probably due to DNS' subdomain numbered separator scheme).
+
+            Thus, we require that X[0] is the same constant value throughout the majority of checked solutions.
+            (We use the majority to account for some random error exactly as FH does using the MSGlen.lenhypoThresh)
+
+            :param solutionAcceptable: Dict of which solution is acceptable for which combination of messages.
+            :return: Whether the given candidate is acceptable.
+            """
+            acceptCount = Counter(solutionAcceptable.values())
+            mostlyAcceptable = bool(acceptCount[True] / len(acceptCount) > MSGlen.lenhypoThresh)
             # noinspection PyTypeChecker
-            self._msgbylen = None  # type: Dict[int, List[L4NetworkMessage]]
-            """Homogeneous Size Collections"""
-            # noinspection PyTypeChecker
-            self._msgmixlen = None  # type: List[L4NetworkMessage]
-            # noinspection PyTypeChecker
-            self._candidateAtNgram = None  # type: Dict[int, List[int]]
-            # noinspection PyTypeChecker
-            self._acceptedCandidates = None  # type: Dict[int, int]
-            """Associates offset with a field length (n-gram's n) to define a list of unambiguous MSG-Len candidates"""
-            # noinspection PyTypeChecker
-            self._acceptedX = None  # type: Dict[int, numpy.ndarray]
-            """Maps offsets to (a,b) that solve the linear equation in #verifyCandidates() 
-            (FH: 'Msg. Len. Model Parameters')"""
-
-            self.differentSizeCollections()
-            self.findCandidates()
-            self.verifyCandidates()
-
-            # create segments for each accepted candidate
-            self._segments = MSGlen._posLen2segments(self._direction, self.acceptedCandidates.items())
-
-        def differentSizeCollections(self):
-            """
-            "stratifying messages by length": extract different size collection -> vector of message lengths
-
-            :return: List of messages that contains an equal amount of messages of each length,
-                i. e., List of according message lengths
-            """
-            if len(self._direction) == 0:  # "No flows in this direction."
-                self._msgmixlen = list()
-                return
-            keyfunc = lambda m: len(m.data)
-            # Homogeneous Size Collections
-            self._msgbylen = {k: list(v) for k, v in groupby(sorted(self._direction, key=keyfunc), keyfunc)}
-            minCollSize = min(len(v) for v in self._msgbylen.values())
-            # generate size-heterogeneous collection by random sampling
-            msgmixlen = list()
-            for k, v in self._msgbylen.items():
-                random.seed(42)
-                if len(v) > minCollSize:
-                    msgmixlen.extend(random.sample(v, k=minCollSize))
-                else:
-                    msgmixlen.extend(v)
-            self._msgmixlen = msgmixlen
-
-        def findCandidates(self):
-            """
-            Find message-length candidates (in parenthesis: block names from FH, Fig. 3 center):
-            * filter for message offsets where the n-gram is not constant and not random (Entropy Filter)
-            * correlate n-grams to message lengths (Pearson Correlation)
-
-            :return: The offsets (dict value: list) where the Pearson Correlation
-                exceeds the threshold MSGlen.minCorrelation
-                for different sized n-grams (dict key).
-            """
-            # "Extract Vector of Message Length"
-            lens4msgmix = [len(m.data) for m in self._msgmixlen]  # type: List[int]
-            candidateAtNgram = dict()
-            # iterate n-grams' n=32, 24, 16 bits (4, 3, 2 bytes), see 3.1.2
-            for n in [4, 3, 2]:
-                # entropy filter for each n-gram offset for "Field Values Matrix" below
-                offsets = MSGlen.entropyFilteredOffsets(self._msgmixlen, n)
-                # TODO currently only tested for big endian, see #intsFromNgrams
-                # TODO for textual protocols decode the n-gram as (ASCII) number (FH, Sec. 3.2.2, second paragraph)
-                ngIters = (intsFromNgrams(
-                    iterateSelected(NgramIterator(msg, n), offsets), type(self).endianness) for msg in self._msgmixlen)
-                # "Field Values Matrix"
-                ngramsAtOffsets = numpy.array(list(ngIters))
-
-                # correlate columns of ngramsAtOffsets to lens4msgmix
-                pearsonAtOffset = list()
-                for ngrams in ngramsAtOffsets.T:
-                    # Pearson correlation coefficient (numeric value of n-gram) -> (len(msg.data))
-                    pearsonAtOffset.append(pearsonr(ngrams, lens4msgmix)[0])
-                candidateAtNgram[n] = [o for pao, o in zip(pearsonAtOffset, offsets) if pao > MSGlen.minCorrelation]
-            self._candidateAtNgram = candidateAtNgram
-
-        def verifyCandidates(self):
-            """
-            Verify the length-hypothesis for candidates, by solving the linear equation
-            for values at the candidate n-grams in candidateAtNgram (precedence for larger n, i. e., longer fields):
-
-              MSG_len = a * value + b (a > 0, b \in N)  - "Msg. Len. Model Parameters"
-                  lens4msgmix = ngramsAtOffsets[:,candidateAtNgram[n]] * a + 1 * b
-
-            At least a threshold 0.9 of the message pairs with different lengths has to fulfill the hypothesis.
-            """
-            acceptedCandidates = dict()  # type: Dict[int, int]
-            acceptedX = dict()
-            # specifying found acceptable solutions at offset (key) with n (value) for this direction
-            for n in [4, 3, 2]:
-                for offset in self._candidateAtNgram[n]:
-                    # check precedence: if longer already-accepted n-gram overlaps this offset ignore
-                    # noinspection PyTypeChecker
-                    if not MSGlen.checkPrecedence(offset, n, acceptedCandidates.items()):
-                        continue
-                    # MSG-len hypothesis test - for ALL message pairs with different lengths (FH, 3.2.2 last paragraph)
-                    #   - for the n-grams from this offset - keep only those offsets, where the threshold of pairs holds
-                    solutionAcceptable = dict()  # type: Dict[Tuple[AbstractMessage, AbstractMessage], True]
-                    Xes = list()
-                    for l1, l2 in combinations(self._msgbylen.keys(),2):
-                        for msg0, msg1 in product(self._msgbylen[l1], self._msgbylen[l2]):
-                            ngramPair = [msg0.data[offset:offset + n], msg1.data[offset:offset + n]]
-                            if ngramPair[0] == ngramPair[1]:
-                                solutionAcceptable[(msg0, msg1)] = False
-                                continue
-                            A = numpy.array( [intsFromNgrams(ngramPair), [1, 1]] ).T
-                            B = numpy.array( [len(msg0.data), len(msg1.data)] )
-                            try:  # solve the linear equation
-                                X = numpy.linalg.inv(A).dot(B)
-                                solutionAcceptable[(msg0, msg1)] = X[0] > 0 and X[1].is_integer()
-                                Xes.append(X)
-                            except numpy.linalg.LinAlgError:
-                                print("LinAlgError occurred. Solution considered as non-acceptable.")
-                                solutionAcceptable[(msg0, msg1)] = False
-                    acceptCount = Counter(solutionAcceptable.values())
-                    if acceptCount[True]/len(acceptCount) > MSGlen.lenhypoThresh:
-                        acceptedCandidates[offset] = n
-                        acceptedX[offset] = Xes
-                        # TODO FH does not require this, but the values in A and B should be equal within,
-                        #  so that a and b is one scalar value each. Otherwise we end up with lots of FPs.
-                        #  Example: In SMB, the 'Msg. Len. Model Parameters' (a,b) == [1., 4.]
-                        #  of the 4-gram at offset 0, 4 is nbss.length, i. e., a TP!
-                        #  Offsets 16 and 22 are FP, but with diverging A and B vectors.
-                        #  Thus, requiring that a and b are scalars here would help.
-                        #  Another example: In DNS, the beginning of the queried name is a FP (probably due to DNS'
-                        #  subdomain numbered separator scheme).
-            self._acceptedCandidates = acceptedCandidates
-            self._acceptedX = {offset: numpy.array(aX) for offset, aX in acceptedX.items()}
-
-        @property
-        def acceptedCandidates(self) -> Dict[int, int]:
-            """Associates offset with a field length (n-gram's n) to define a list of unambiguous MSG-Len candidates"""
-            return self._acceptedCandidates
-
-        @property
-        def segments(self):
-            return self._segments
+            constantMultiplicator = all(numpy.round(Xarray[0,0], 8) == numpy.round(Xarray[1:,0], 8))
+            logging.getLogger(__name__).debug(f"Candidate mostlyAcceptable {mostlyAcceptable} "
+                                              f"and has constantMultiplicator {constantMultiplicator}.")
+            return mostlyAcceptable and constantMultiplicator
 
 
 class CategoricalCorrelatedField(FieldType,ABC):
@@ -288,7 +165,6 @@ class HostID(CategoricalCorrelatedField):
     """
     Host identifier (Host-ID) inference (FH, Sec. 3.2.3)
     Find n-gram that is strongly correlated with IP address of sender.
-
 
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     # # # # Investigate low categoricalCorrelation for all but one byte within an address field (see NTP and DHCP).

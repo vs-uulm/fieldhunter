@@ -3,9 +3,7 @@ Only implements FH's binary message handling using n-grams (not textual using de
 """
 
 from argparse import ArgumentParser
-from time import time, strftime
-from openpyxl import Workbook
-from os.path import join, exists
+from time import time
 
 # noinspection PyUnresolvedReferences
 from tabulate import tabulate
@@ -15,7 +13,7 @@ from pprint import pprint
 import IPython
 
 from nemere.utils.loader import SpecimenLoader
-from nemere.utils.evaluationHelpers import StartupFilecheck, reportFolder
+from nemere.utils.evaluationHelpers import StartupFilecheck
 from nemere.utils.reportWriter import writeReport
 from nemere.validation.dissectorMatcher import MessageComparator, DissectorMatcher
 
@@ -117,46 +115,12 @@ if __name__ == '__main__':
     writeReport(message2quality, inferenceDuration, specimens, comparator, "fieldhunter-literal",
                 filechecker.reportFullPath)
 
-    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-    # # # TODO Working area
-    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
     # FTR validation: calculate TP/FP/FN ==> P/R per protocol and per type
-    ovTitle = "Overview"
-    infieldWorkbook = Workbook()
-    infieldWorkbook.active.title = ovTitle
-    ovSheet = infieldWorkbook[ovTitle]
-    ovSheet.append(FieldTypeReport.overviewHeaders)
+    infieldWorkbook = FieldTypeReport.newWorkbook()
     for infields in sortedInferredTypes:
         infieldReport = FieldTypeReport(infields, comparator, segmentedMessages)
-        infieldReport.addXLworksheet(infieldWorkbook, ovTitle)
-    infieldFilename = join(reportFolder,
-                           f"FieldTypeReport_{filechecker.pcapstrippedname}_{strftime('%Y%m%d-%H%M%S')}.xlsx")
-    if not exists(infieldFilename):
-        print("Write field type report to", infieldFilename)
-        infieldWorkbook.save(infieldFilename)
-    else:
-        print("Could not write", infieldFilename, "- File exists")
-        for worksheet in infieldWorkbook.worksheets:
-            headers = worksheet.rows[0]
-            cells = worksheet.rows[1:]
-            print( f"\nReport for {worksheet.title}:\n" + tabulate(cells, headers=headers) )
-
-
-
-    # for later
-    #
-    # TODO derive an "improved" implementation:
-    #  new separate main script,
-    #  define a collection of base classes for the literal and improved implementations,
-    #  copy/subclass the fieldtypes module and address the todos there
-
-    # msglenfields
-    # msgtypefields
-    # hostidfields
-    # sessionidfields
-    # transidfields
-    # accumulatorfields
+        infieldReport.addXLworksheet(infieldWorkbook, FieldTypeReport.ovTitle)
+    FieldTypeReport.saveWorkbook(infieldWorkbook, filechecker.pcapstrippedname)
 
     # interactive
     if args.interactive:

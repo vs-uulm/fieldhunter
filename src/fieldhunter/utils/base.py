@@ -133,6 +133,10 @@ class Flows(object):
         self._messages = messages
         self._flows = self._identify()
 
+    @property
+    def messages(self):
+        return self._messages
+
     def _identify(self) -> Dict[Tuple, List[L4NetworkMessage]]:
         """
         Identify flows.
