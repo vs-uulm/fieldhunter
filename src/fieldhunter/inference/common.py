@@ -2,7 +2,7 @@
 Common handling of inference intermediates or results.
 """
 
-from typing import Iterable, List, Tuple, Dict, Union
+from typing import Iterable, List, Tuple, Dict
 
 from netzob.Model.Vocabulary.Messages.AbstractMessage import AbstractMessage
 from netzob.Model.Vocabulary.Symbol import Symbol

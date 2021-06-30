@@ -1,5 +1,5 @@
 """
-Infer message field types according to the FieldHunter paper Section 3.2
+Infer message field types exactly according to the FieldHunter paper Section 3.2
 
 TODO introduce doctests to check critical functions in inference.fieldtypes
 """
@@ -255,7 +255,7 @@ class MSGlen(NonConstantNonRandomEntropyFieldType):
         Provides methods to extract different size collections, finding candidates by Pearson correlation coefficient,
         and verifying the hypothesis of candidates denoting the length of the message.
         """
-        # TODO also support little endian
+        # TODO also support little endian (for our test traces, it was irrelevant)
         endianness = 'big'
 
         def  __init__(self, direction: List[L4NetworkMessage]):
@@ -772,7 +772,7 @@ class Accumulator(FieldType):
     """
     typelabel = 'Accumulator'
 
-    # TODO also support little endian
+    # TODO also support little endian (for our test traces, it was irrelevant)
     endianness = 'big'
     ns = (8, 4, 3, 2)
     deltaEntropyThresh = 0.8  # Not given in FH, own empirics: 0.2
@@ -897,7 +897,7 @@ class Accumulator(FieldType):
 
 
 # Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence
-# MSG-Len would be overwritten by MSG-Type (see SMB: nbss.length)  # TODO double check for FPs!
+# MSG-Len would be overwritten by MSG-Type (see SMB: nbss.length), so first use MSG-Len
 precedence = {MSGlen.typelabel: 0, MSGtype.typelabel: 1, HostID.typelabel: 2,
               SessionID.typelabel: 3, TransID.typelabel: 4, Accumulator.typelabel: 5}
 """

@@ -35,6 +35,14 @@ class FieldTypeReport(object):
 
     def __init__(self, fieldtype: FieldType, comparator: MessageComparator,
                  segmentedMessages: Dict[AbstractMessage, List[MessageSegment]] = None):
+        """
+
+        :param fieldtype: The field type object to generate a report for.
+        :param comparator: A NEMERE MessageComparator to look up the true fields overlapping our inference.
+        :param segmentedMessages: Optional Dict of segmented messages to check whether another field type got
+            precedence for single inference instances. see fieldhunter.inference.fieldtypes#precedence and
+            fieldhunter.inference.common#segmentedMessagesAndSymbols
+        """
         self._fieldtype = fieldtype
         self._comparator = comparator
         self._segmentedMessages = segmentedMessages
@@ -43,9 +51,6 @@ class FieldTypeReport(object):
         """
         Lookup the overlap with the ground truth for all segments inferred for the given FieldHunter field type.
 
-        :param segmentedMessages: Optional Dict of segmented messages to check whether another field type got
-            precedence for single inference instances. see fieldhunter.inference.fieldtypes#precedence and
-            fieldhunter.inference.common#segmentedMessagesAndSymbols
         :return: table (list of lists) of statistics for each inferred segment from field type, according to the
             columns given in FieldTypeReport#headers.
         """
@@ -113,7 +118,7 @@ class GroundTruth(object):
                               "nbns.flags", "smb.cmd", "smb.flags", ],
         HostID.typelabel:    ["dhcp.ip.client", "dhcp.ip.your", "dhcp.ip.server", "ntp.refid"],
         SessionID.typelabel: ["dhcp.id", "smb.pid", "smb.uid", "smb.mid"],
-        TransID.typelabel:   ["dns.id"],
+        TransID.typelabel:   ["dns.id", "nbns.id"],
         Accumulator.typelabel: []
     }
 

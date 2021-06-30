@@ -33,7 +33,7 @@ if __name__ == '__main__':
     parser.add_argument('pcapfilename', help='Filename of the PCAP to load.')
     parser.add_argument('-i', '--interactive', help='open ipython prompt after finishing the analysis.',
                         action="store_true")
-    # TODO remove these options: FH requires TCP/UDP over IP (FH, Section 6.6)
+    # Pointless options: FH requires TCP/UDP over IP (FH, Section 6.6)
     # parser.add_argument('-l', '--layer', type=int, default=2,
     #                     help='Protocol layer relative to IP to consider. Default is 2 layers above IP '
     #                          '(typically the payload of a transport protocol).')
@@ -95,9 +95,10 @@ if __name__ == '__main__':
 
     print(tabulate(
         [(infield.typelabel,
-          sum(1 for msgsegs in infield.segments if len(msgsegs) > 0),
-          max(len(msgsegs) for msgsegs in infield.segments)
-          ) for infield in sortedInferredTypes],
+            sum(1 for msgsegs in infield.segments if len(msgsegs) > 0),
+            max(len(msgsegs) for msgsegs in infield.segments)
+                if len(infield.segments) > 0 else 0 # prevent empty sequence for max()
+        ) for infield in sortedInferredTypes],
         headers=["typelabel","messages","max inferred per msg"]
     ))
 
@@ -127,7 +128,7 @@ if __name__ == '__main__':
     ovSheet = infieldWorkbook[ovTitle]
     ovSheet.append(FieldTypeReport.overviewHeaders)
     for infields in sortedInferredTypes:
-        infieldReport = FieldTypeReport(infields, comparator)
+        infieldReport = FieldTypeReport(infields, comparator, segmentedMessages)
         infieldReport.addXLworksheet(infieldWorkbook, ovTitle)
     infieldFilename = join(reportFolder,
                            f"FieldTypeReport_{filechecker.pcapstrippedname}_{strftime('%Y%m%d-%H%M%S')}.xlsx")
