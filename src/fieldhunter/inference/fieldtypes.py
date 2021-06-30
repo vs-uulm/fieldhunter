@@ -422,7 +422,6 @@ class CategoricalCorrelatedField(FieldType,ABC):
     """
     correlationThresh = 0.9  # 0.9, threshold for correlation between host ID and IP address(es) (FH, Sec. 3.2.3)
     minLenThresh = 4  # host ID fields must at least be 4 bytes long (FH, Sec. 3.2.3)
-    n = 1  # Host-ID uses 8-bit/1-byte n-grams according to FH, Sec. 3.1.2, but this does not work well (see below)
 
     @classmethod
     @abstractmethod
@@ -436,13 +435,15 @@ class CategoricalCorrelatedField(FieldType,ABC):
         raise NotImplementedError("Implement this abstract class method in a subclass.")
 
     @classmethod
-    def correlate(cls, messages: List[L2NetworkMessage]):
+    def correlate(cls, messages: List[L2NetworkMessage], n: int = 1):
         """
         Generate n-grams at the same offsets for each message an correlate each n-gram using
         categorical correlation: R(x, y) = I(x: y)/H(x, y) \in [0,1]
         Uses cls#n to determine the n-gram sizes and cls#_values2correlate2() to obtain tuples of data to correlate.
 
         :param messages: Messages to generate n-grams to correlate to.
+        :param n: Host-ID uses 8-bit/1-byte n-grams according to FH, Sec. 3.1.2, but this does not work well
+            (see fieldtypesRelaxed.CategoricalCorrelatedField)
         :return: Correlation values for each offset of n-grams generated from the messages.
         """
         # ngram at offset and src address
@@ -450,10 +451,13 @@ class CategoricalCorrelatedField(FieldType,ABC):
         categoricalCorrelation = list()
         corrValues = cls._values2correlate2(messages)
         # Iterate n-grams of all messages
-        for ngrams in zip(*(NgramIterator(msg, n=CategoricalCorrelatedField.n) for msg in messages)):
-            ngSc = numpy.array([intsFromNgrams(ngrams), corrValues])
-            # categoricalCorrelation: R(x, y) = I(x: y)/H(x, y) \in [0,1]
-            catCorr = drv.information_mutual(ngSc[0], ngSc[1]) / drv.entropy_joint(ngSc)
+        for ngrams in zip(*(NgramIterator(msg, n=n) for msg in messages)):
+            ngSc = cls._combineNgrams2Values(ngrams, corrValues)
+            if ngSc.size > 0:
+                # categoricalCorrelation: R(x, y) = I(x: y)/H(x, y) \in [0,1]
+                catCorr = drv.information_mutual(ngSc[0], ngSc[1]) / drv.entropy_joint(ngSc)
+            else:
+                catCorr = numpy.nan
             ngramsSrcs.append(ngSc)
             categoricalCorrelation.append(catCorr)
         return categoricalCorrelation
@@ -481,6 +485,10 @@ class CategoricalCorrelatedField(FieldType,ABC):
         # noinspection PyUnresolvedReferences
         return self._categoricalCorrelation
 
+    @classmethod
+    def _combineNgrams2Values(cls, ngrams: Iterable[bytes], values: List[int]) -> numpy.ndarray:
+        return numpy.array([intsFromNgrams(ngrams), values])
+
 
 class HostID(CategoricalCorrelatedField):
     """
@@ -499,7 +507,7 @@ class HostID(CategoricalCorrelatedField):
     @classmethod
     def _values2correlate2(cls, messages: List[L2NetworkMessage]):
         """
-        Recover byte representation of ipv4 address from Netzob message and make one int out if each.
+        Recover byte representations of the IPv4 addresses from all Netzob messages and make one int out if each.
         :param messages: Messages to generate n-grams to correlate to.
         :return:
         """
@@ -532,8 +540,8 @@ class SessionID(CategoricalCorrelatedField):
     @classmethod
     def _values2correlate2(cls, messages: List[L2NetworkMessage]):
         """
-        Get source AND destination addresses in same manner as (just) source for Host-ID.
-        Recover byte representation of ipv4 address from Netzob message and make one int out if each.
+        Get source AND destination addresses in the same manner as (just) the source for Host-ID.
+        Recover byte representations of the IPv4 addresses from all Netzob messages and make one int out if each.
 
         :param messages: Messages to generate n-grams to correlate to.
         :return: integer representation of source and destination addresses for each message.

@@ -6,7 +6,7 @@ TODO introduce doctests to check critical functions in inference.fieldtypes
 """
 from typing import List, Tuple, Dict, Iterable, ItemsView, Union
 import random, logging
-from itertools import groupby, product, chain, combinations
+from itertools import groupby, product, chain, combinations, zip_longest
 from collections import Counter
 from abc import ABC, abstractmethod
 
@@ -94,179 +94,148 @@ class MSGlen(fieldtypes.MSGlen):
             return mostlyAcceptable and constantMultiplicator
 
 
-class CategoricalCorrelatedField(FieldType,ABC):
+class CategoricalCorrelatedField(fieldtypes.CategoricalCorrelatedField,ABC):
     """
     Abstract class for inferring field types using categorical correlation of n-gram values with external values, e. g.,
     environmental information like addresses from encapsulation.
+
+    Enhancement of fieldtypes.CategoricalCorrelatedField to iteratively check n-grams from size four to one.
     """
-    correlationThresh = 0.9  # 0.9, threshold for correlation between host ID and IP address(es) (FH, Sec. 3.2.3)
-    minLenThresh = 4  # host ID fields must at least be 4 bytes long (FH, Sec. 3.2.3)
-    n = 1  # Host-ID uses 8-bit/1-byte n-grams according to FH, Sec. 3.1.2, but this does not work well (see below)
+    # correlationThresh = 0.8  # Reduced from 0.9 (FH, Sec. 3.2.3)
 
     @classmethod
-    @abstractmethod
-    def _values2correlate2(cls, messages: List[L2NetworkMessage]):
+    def correlate(cls, messages: List[L2NetworkMessage], n: int = 4):
         """
-        Implement to determine the external values to correlate the n-grams of messages with.
+        Generate n-grams with n's from large to small
+        at the same offsets for each message an correlate each n-gram using categorical correlation.
 
-        :param messages: Messages for which to generate correlation values.
-        :return: The list of values, one for each message in the given order, to correlate to.
-        """
-        raise NotImplementedError("Implement this abstract class method in a subclass.")
-
-    @classmethod
-    def correlate(cls, messages: List[L2NetworkMessage]):
-        """
-        Generate n-grams at the same offsets for each message an correlate each n-gram using
-        categorical correlation: R(x, y) = I(x: y)/H(x, y) \in [0,1]
-        Uses cls#n to determine the n-gram sizes and cls#_values2correlate2() to obtain tuples of data to correlate.
+        see fieldtypes.CategoricalCorrelatedField#correlate()
+        see HostID for the rationale of this enhancement over FH.
 
         :param messages: Messages to generate n-grams to correlate to.
+        :param n: maximum of n to correlate from large to small
         :return: Correlation values for each offset of n-grams generated from the messages.
         """
-        # ngram at offset and src address
-        ngramsSrcs = list()
-        categoricalCorrelation = list()
-        corrValues = cls._values2correlate2(messages)
-        # Iterate n-grams of all messages
-        for ngrams in zip(*(NgramIterator(msg, n=CategoricalCorrelatedField.n) for msg in messages)):
-            ngSc = numpy.array([intsFromNgrams(ngrams), corrValues])
-            # categoricalCorrelation: R(x, y) = I(x: y)/H(x, y) \in [0,1]
-            catCorr = drv.information_mutual(ngSc[0], ngSc[1]) / drv.entropy_joint(ngSc)
-            ngramsSrcs.append(ngSc)
-            categoricalCorrelation.append(catCorr)
+        categoricalCorrelation = None
+        for n in range(4,0,-1):
+            # this is one correlation value for each n-gram starting at the offset
+            corrAtOffset = super().correlate(messages, n)
+            if categoricalCorrelation is None:  # initial fill
+                categoricalCorrelation = [-1] * (len(corrAtOffset) + n - 1)
+            if len(corrAtOffset) + n - 1 != len(categoricalCorrelation):  # validity check
+                # this should not occur of #correlate() is correct and called with the same set of messages
+                raise RuntimeError("Too few values to correlate.")
+            for offset, corr in enumerate(corrAtOffset):  # iterate all n-gram offsets
+                for nOff in range(offset, offset+n):  # check/set the correlation for ALL bytes of this n-gram
+                    if categoricalCorrelation[nOff] < corr:
+                        categoricalCorrelation[nOff] = corr
+            corRepr = [f"{cc:.3f}" for cc in categoricalCorrelation]
+            logging.getLogger(__name__).debug(f"Correlation of {n}-ngrams: {corRepr}")
         return categoricalCorrelation
 
     @classmethod
-    def catCorrPosLen(cls, categoricalCorrelation: List[float]):
+    def _combineNgrams2Values(cls, ngrams: Iterable[bytes], values: List[int]):
         """
-        Merge consecutive candidate n-grams with categoricalCorrelation > correlationThresh.
-        Filters n-gram offsets on defined thresholds (FH, Sec. 3.2.3) by their categorical correlation values to
-            * correlation between host ID and IP address(es) > correlationThresh
-            * discard short fields < minHostLenThresh
+        The correlation is perfect if null values are omitted
 
-        :param categoricalCorrelation: Correlation values for each offset of n-grams generated from the messages.
-        :return: List of start-length tuples with categorical correlation above threshold and not being a short field.
+        >>> ngrand = [b'\xa2\xe7',
+        ...           b'r\x06',
+        ...           b'\x0f?',
+        ...           b'd\x8a',
+        ...           b'\xa0X',
+        ...           b'\x04\xba',
+        ...           b'\x19r',
+        ...           b'\x17M',
+        ...           b',\xda',
+        ...           b'9K',
+        ...           b'<3',
+        ...           b'\xaa\xdf']
+        >>> valRnd = ['0.601',
+        ...           '0.601',
+        ...           '0.601',
+        ...           '0.601',
+        ...           '0.804',
+        ...           '0.804',
+        ...           '0.804',
+        ...           '0.804',
+        ...           '0.804',
+        ...           '0.792',
+        ...           '0.731',
+        ...           '0.722']
+        >>> from fieldhunter.inference.fieldtypesRelaxed import CategoricalCorrelatedField
+        >>> CategoricalCorrelatedField._combineNgrams2Values(ngrand, valRnd)
+
         """
-        catCorrOffsets = [ offset for offset, catCorr in enumerate(categoricalCorrelation)
-                           if catCorr > cls.correlationThresh ]
-        catCorrRanges = list2ranges(catCorrOffsets)
-        # discard short fields < minHostLenThresh
-        return [ (start, length) for start, length in catCorrRanges if length >= cls.minLenThresh ]
-
-    @property
-    def categoricalCorrelation(self):
-        # !! This attribute needs to be defined in subclass init !!
-        # noinspection PyUnresolvedReferences
-        return self._categoricalCorrelation
+        nonNull = list(zip(*filter(lambda x: set(x[0]) != {0}, zip(ngrams, values))))
+        if len(nonNull) == 0:
+            nonNull = [[],[]]
+        return super(CategoricalCorrelatedField, cls)._combineNgrams2Values(*nonNull)
 
 
-class HostID(CategoricalCorrelatedField):
+class HostID(CategoricalCorrelatedField, fieldtypes.HostID):
     """
-    Host identifier (Host-ID) inference (FH, Sec. 3.2.3)
+    Relaxed version of host identifier (Host-ID) inference (FH, Sec. 3.2.3)
     Find n-gram that is strongly correlated with IP address of sender.
 
-    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-    # # # # Investigate low categoricalCorrelation for all but one byte within an address field (see NTP and DHCP).
-    # # # # According to NTP offset 12 (REF ID, often DST IP address) and DHCP offsets (12, 17, and) 20 (IPs)
-    # # # # this works in principle, but if the n-gram is too short the correlation gets lost for some n-grams.
-    # # print(tabulate(zip(*[hostidfields.categoricalCorrelation]), showindex="always"))
-    # # from matplotlib import pyplot
-    # # pyplot.bar(range(len(hostidfields.categoricalCorrelation)), hostidfields.categoricalCorrelation)
-    # # pyplot.show()
-    # # # sum([msg.data[20:24] == bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
-    # # # sum([int.from_bytes(messages[m].data[20:24], "big") == srcs[m] for m in range(len(messages))])
-    # # # # While the whole bootp.ip.server [20:24] correlates nicely to the IP address, single n-grams don't.
-    # # serverIP = [(int.from_bytes(messages[m].data[20:24], "big"), srcs[m]) for m in range(len(messages))]
-    # # serverIP0 = [(messages[m].data[20], srcs[m]) for m in range(len(messages))]
-    # # serverIP1 = [(messages[m].data[21], srcs[m]) for m in range(len(messages))]
-    # # serverIP2 = [(messages[m].data[22], srcs[m]) for m in range(len(messages))]
-    # # serverIP3 = [(messages[m].data[23], srcs[m]) for m in range(len(messages))]
-    # # # nsp = numpy.array([sip for sip in serverIP])
-    # # # # The correlation is perfect, if null values are omitted
-    # # nsp = numpy.array([sip for sip in serverIP if sip[0] != 0])   #  and sip[0] == sip[1]
-    # # # nsp0 = numpy.array(serverIP0)
-    # # # nsp1 = numpy.array(serverIP1)
-    # # # nsp2 = numpy.array(serverIP2)
-    # # # nsp3 = numpy.array(serverIP3)
-    # # nsp0 = numpy.array([sip for sip in serverIP0 if sip[0] != 0])
-    # # nsp1 = numpy.array([sip for sip in serverIP1 if sip[0] != 0])
-    # # nsp2 = numpy.array([sip for sip in serverIP2 if sip[0] != 0])
-    # # nsp3 = numpy.array([sip for sip in serverIP3 if sip[0] != 0])
-    # # for serverSrcPairs in [nsp, nsp0, nsp1, nsp2, nsp3]:
-    # #     print(drv.information_mutual(serverSrcPairs[:, 0], serverSrcPairs[:, 1]) / drv.entropy_joint(serverSrcPairs.T))
-    # # # # TODO This is no implementation error, but raises doubts about the Host-ID description completeness:
-    # # # #  Probably it does not mention an Entropy filter, direction separation, or - most probably -
-    # # # #  an iterative n-gram size increase (see MSGlen).
-    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+    see fieldtypes.HostID
 
+    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+    # # We investigated the low categoricalCorrelation for all but one byte within an address field (see NTP and DHCP).
+    # # According to NTP offset 12 (REF ID, often DST IP address) and DHCP offsets (12, 17, and) 20 (IPs)
+    # # this works in principle, but if the n-gram is too short the correlation gets lost for some n-grams.
+    print(tabulate(zip(*[hostidfields.categoricalCorrelation]), showindex="always"))
+    from matplotlib import pyplot
+    pyplot.bar(range(len(hostidfields.categoricalCorrelation)), hostidfields.categoricalCorrelation)
+    pyplot.show()
+    # sum([msg.data[20:24] == bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
+    # sum([int.from_bytes(messages[m].data[20:24], "big") == srcs[m] for m in range(len(messages))])
+    # # While the whole dhcp.ip.server [20:24] correlates nicely to the IP address, single n-grams don't.
+    serverIP = [(int.from_bytes(messages[m].data[20:24], "big"), srcs[m]) for m in range(len(messages))]
+    serverIP0 = [(messages[m].data[20], srcs[m]) for m in range(len(messages))]
+    serverIP1 = [(messages[m].data[21], srcs[m]) for m in range(len(messages))]
+    serverIP2 = [(messages[m].data[22], srcs[m]) for m in range(len(messages))]
+    serverIP3 = [(messages[m].data[23], srcs[m]) for m in range(len(messages))]
+    # nsp = numpy.array([sip for sip in serverIP])
+    # # The correlation is perfect, if null values are omitted
+    nsp = numpy.array([sip for sip in serverIP if sip[0] != 0])   #  and sip[0] == sip[1]
+    # nsp0 = numpy.array(serverIP0)
+    # nsp1 = numpy.array(serverIP1)
+    # nsp2 = numpy.array(serverIP2)
+    # nsp3 = numpy.array(serverIP3)
+    nsp0 = numpy.array([sip for sip in serverIP0 if sip[0] != 0])
+    nsp1 = numpy.array([sip for sip in serverIP1 if sip[0] != 0])
+    nsp2 = numpy.array([sip for sip in serverIP2 if sip[0] != 0])
+    nsp3 = numpy.array([sip for sip in serverIP3 if sip[0] != 0])
+    for serverSrcPairs in [nsp, nsp0, nsp1, nsp2, nsp3]:
+        print(drv.information_mutual(serverSrcPairs[:, 0], serverSrcPairs[:, 1]) / drv.entropy_joint(serverSrcPairs.T))
+    # # Thus, this is no implementation error, but raises doubts about the Host-ID description completeness:
+    # # Probably it does not mention an Entropy filter, direction separation, or - most probably -
+    # # an iterative n-gram size increase (like for MSGlen). Thus, we implement such an iterative n-gram analysis
+    # # in this class's relaxed super-class CategoricalCorrelatedField.
+    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
     """
-    typelabel = 'Host-ID'
-
-    def __init__(self, messages: List[L2NetworkMessage]):
-        super().__init__()
-        self._messages = messages
-        self._categoricalCorrelation = type(self).correlate(messages)
-        self._catCorrPosLen = type(self).catCorrPosLen(self._categoricalCorrelation)
-        self._segments = type(self)._posLen2segments(messages, self._catCorrPosLen)
-
-    @classmethod
-    def _values2correlate2(cls, messages: List[L2NetworkMessage]):
-        """
-        Recover byte representation of ipv4 address from Netzob message and make one int out if each.
-        :param messages: Messages to generate n-grams to correlate to.
-        :return:
-        """
-        return intsFromNgrams([bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
 
 
-class SessionID(CategoricalCorrelatedField):
+class SessionID(CategoricalCorrelatedField, fieldtypes.SessionID):
     """
-    Session identifier (Session-ID) inference (FH, Section 3.2.4)
+    Relaxed version of session identifier (Session-ID) inference (FH, Section 3.2.4)
     Find n-gram that is strongly correlated with IP addresses of sender and receiver
     using categorical correlation like Host-ID.
 
-    Most of FH, Section 3.2.4, refers to Host-ID, so we use all missing details from there and reuse the implementation.
-    The only difference are the values to correlate (see #_values2correlate2())
+    see fieldtypes.SessionID
 
-    # # TODO Problem similar to Host-ID leads to same bad quality.
-    # # Moreover, Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence.
+    A problem similar to Host-ID's leads to the same bad quality, thus, we apply the same change via the relaxed
+    super-class CategoricalCorrelatedField.
     """
-    typelabel = 'Session-ID'
-
-    def __init__(self, messages: List[L2NetworkMessage]):
-        super().__init__()
-        self._messages = messages
-        # #correlate() uses #_values2correlate2() to determine what to correlate.
-        #   Thus is iterates the n-grams (n=1) and create (n-grams,(source,destination))-tuples
-        #   (instead of just n-grams to source for Host-ID).
-        # It correlates the n-grams to the (client IP, server IP) tuple by calculating the catCorr for the
-        #   n-gram and the source/destination tuple
-        self._categoricalCorrelation = type(self).correlate(messages)
-        self._catCorrPosLen = type(self).catCorrPosLen(self._categoricalCorrelation)
-        self._segments = type(self)._posLen2segments(messages, self._catCorrPosLen)
-
-    @classmethod
-    def _values2correlate2(cls, messages: List[L2NetworkMessage]):
-        """
-        Get source AND destination addresses in same manner as (just) source for Host-ID.
-        Recover byte representation of ipv4 address from Netzob message and make one int out if each.
-
-        :param messages: Messages to generate n-grams to correlate to.
-        :return: integer representation of source and destination addresses for each message.
-        """
-        return intsFromNgrams([bytes(map(int,
-                                         msg.source.rpartition(':')[0].split('.') +
-                                         msg.destination.rpartition(':')[0].split('.'))
-                                     ) for msg in messages])
+    # correlationThresh = 0.5  # Reduced from 0.9 (FH, Sec. 3.2.3)
 
 
-class TransID(FieldType):
+class TransID(fieldtypes.TransID):
     """
-    Transaction identifier (Trans-ID) inference (FH, Section 3.2.5, Fig. 3 right)
-    """
-    typelabel = 'Trans-ID'
+    Relaxed version of transaction identifier (Trans-ID) inference (FH, Section 3.2.5, Fig. 3 right)
 
+    see fieldtypes.TransID
+    """
     transSupportThresh = 0.8  # enough support in conversations (FH, Sec. 3.2.5)
     minFieldLength = 2  # merged n-grams must at least be this amount of bytes long
     # n-gram size is not explicitly given in FH, but the description (merging, sharp drops in entropy in Fig. 6)
@@ -275,54 +244,6 @@ class TransID(FieldType):
     entropyThresh = 0.8  # Value not given in FH!
     # entropy in c2s/s2c + flows: threshold for high entropy is not given in FH! Use value determined
     #   by own empirics in base.entropyThresh
-
-    def __init__(self, flows: Flows):
-        super().__init__()
-
-        # prepare instance attributes
-        self._flows = flows
-        self._c2s, self._s2c = self._flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
-        self._c2sEntropyFiltered = None
-        self._s2cEntropyFiltered = None
-        self._c2sConvsEntropyFiltered = dict()
-        self._s2cConvsEntropyFiltered = dict()
-        self._c2sHorizontalOffsets = None
-        self._s2cHorizontalOffsets = None
-        self._c2sCombinedOffsets = None
-        self._s2cCombinedOffsets = None
-        self._valuematch = dict()
-        # noinspection PyTypeChecker
-        self._c2sConsistentRanges = None  # type: Iterable[Tuple[int, int]]
-        # noinspection PyTypeChecker
-        self._s2cConsistentRanges = None  # type: Iterable[Tuple[int, int]]
-
-        # Infer
-        self._verticalAndHorizontalRandomNgrams()
-        self._constantQRvalues()
-        self._consistentCandidates()
-        # TODO not needed for textual protocols (FH, Sec. 3.2.5, last sentence)
-        self._c2sConsistentRanges = type(self)._mergeAndFilter(self._c2sConsistentCandidates)
-        self._s2cConsistentRanges = type(self)._mergeAndFilter(self._s2cConsistentCandidates)
-        self._segments = \
-            type(self)._posLen2segments(self._c2s, self._c2sConsistentRanges) + \
-            type(self)._posLen2segments(self._s2c, self._s2cConsistentRanges)
-
-    @classmethod
-    def entropyFilteredOffsets(cls, messages: List[AbstractMessage], absolute=True):
-        """
-        Find offsets of n-grams (with the same offset in different messages of the list), that are random,
-        i. e., that have a entropy > x (threshold)
-
-        FH, Section 3.2.5
-
-        :param messages: Messages to generate n-grams from
-        :param absolute: Use the absolute constant for the threshold if true,
-            make it relative to the maximum entropy if False.
-        :return: Returns a list of offsets that have non-constant and non-random (below entropyThresh) entropy.
-        """
-        entropy = pyitNgramEntropy(messages, cls.n)
-        entropyThresh = cls.entropyThresh if absolute else max(entropy) * cls.entropyThresh
-        return [offset for offset, entropy in enumerate(entropy) if entropy > entropyThresh]
 
     def _verticalAndHorizontalRandomNgrams(self):
         """
@@ -388,56 +309,6 @@ class TransID(FieldType):
         # (TODO alternatively, deviating from FH, use the entry for each response specifically?)
         self._s2cCombinedOffsets = self._s2cHorizontalOffsets.intersection(self._s2cEntropyFiltered)
 
-    def _constantQRvalues(self):
-        """
-        Reqest/Response pairs: search for n-grams with constant values (differing offsets allowed)
-
-        Output is placed in self._valuematch.
-        """
-        # compute Q->R association
-        mqr = self._flows.matchQueryResponse()
-        # from the n-gram offsets that passed the entropy-filters determine those that have the same value in mqr pairs
-        for query, resp in mqr.items():
-            qrmatchlist = self._valuematch[(query, resp)] = list()
-            # value in query at any of the offsets in _c2sCombinedOffsets
-            for c2sOffset in self._c2sCombinedOffsets:
-                if len(query.data) < c2sOffset + type(self).n:
-                    continue
-                qvalue = query.data[c2sOffset:c2sOffset + type(self).n]
-                # matches a value of resp at any of the offsets in _s2cCombinedOffsets
-                for s2cOffset in self._s2cCombinedOffsets:
-                    if len(resp.data) < s2cOffset + type(self).n:
-                        continue
-                    rvalue = resp.data[s2cOffset:s2cOffset + type(self).n]
-                    if qvalue == rvalue:
-                        qrmatchlist.append((c2sOffset, s2cOffset))
-
-    def _consistentCandidates(self):
-        """
-        measure consistency: offsets recognized in more than transSupportThresh of conversations
-
-        Output is written to self._c2sConsistentCandidates and self._s2cConsistentCandidates
-        """
-        c2sCandidateCount = Counter()
-        s2cCandidateCount = Counter()
-        for offsetlist in self._valuematch.values():        # (query, resp), offsetlist
-            if len(offsetlist) < 1:
-                continue
-            # transpose to offsets per direction
-            c2sOffsets, s2cOffsets = zip(*offsetlist)
-            c2sCandidateCount.update(set(c2sOffsets))
-            s2cCandidateCount.update(set(s2cOffsets))
-        self._c2sConsistentCandidates = [offset for offset, cc in c2sCandidateCount.items() if
-                                   cc > type(self).transSupportThresh * len(self._c2s)]
-        self._s2cConsistentCandidates = [offset for offset, cc in s2cCandidateCount.items() if
-                                   cc > type(self).transSupportThresh * len(self._s2c)]
-
-    @classmethod
-    def _mergeAndFilter(cls, consistentCandidates):
-        """
-        merge and filter candidates by minimum length
-        """
-        return [ol for ol in list2ranges(consistentCandidates) if ol[1] >= cls.minFieldLength]
 
 
 # Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence

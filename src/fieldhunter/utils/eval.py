@@ -146,7 +146,7 @@ class GroundTruth(object):
         MSGlen.typelabel:    ["nbss.length"],
         MSGtype.typelabel:   ["dhcp.option.dhcp", "ntp.flags", "ntp.stratum", "dns.flags",
                               "nbns.flags", "smb.cmd", "smb.flags", ],
-        HostID.typelabel:    ["dhcp.ip.client", "dhcp.ip.your", "dhcp.ip.server", "ntp.refid"],
+        HostID.typelabel:    ["dhcp.ip.client", "dhcp.ip.your", "dhcp.ip.server", "dhcp.hw.mac_addr", "ntp.refid"],
         SessionID.typelabel: ["dhcp.id", "smb.pid", "smb.uid", "smb.mid"],
         TransID.typelabel:   ["dns.id", "nbns.id"],
         Accumulator.typelabel: []
