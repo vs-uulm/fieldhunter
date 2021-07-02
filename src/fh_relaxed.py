@@ -1,4 +1,6 @@
 """
+FieldHunter main script with relaxed assumptions (see fieldhunter.inference.fieldtypesRelaxed)
+
 Only implements FH's binary message handling using n-grams (not textual using delimiters!)
 """
 import logging
@@ -124,20 +126,17 @@ if __name__ == '__main__':
         infieldReport.addXLworksheet(infieldWorkbook, FieldTypeReport.ovTitle)
     FieldTypeReport.saveWorkbook(infieldWorkbook, filechecker.pcapstrippedname)
 
-
     # TODO derive an "improved" implementation:
-    #  new separate main script,
-    #  define a collection of base classes for the literal and improved implementations,
-    #  copy/subclass the fieldtypes module and address the todos there
-
-    # msglenfields
-    # msgtypefields
-    # hostidfields
-    # sessionidfields
-    # transidfields
-    # accumulatorfields
+    #  address the todos in module fieldtypesRelaxed
 
     # interactive
     if args.interactive:
+        print("""
+The inference of individual field types can be found in:
+    msglenfields, msgtypefields, hostidfields, sessionidfields, transidfields, accumulatorfields
+    
+A combination per message is in:
+    segmentedMessages, symbols
+""")
         IPython.embed()
 

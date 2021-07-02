@@ -4,25 +4,17 @@ but with some relaxed thresholds and assumptions.
 
 TODO introduce doctests to check critical functions in inference.fieldtypes
 """
-from typing import List, Tuple, Dict, Iterable, ItemsView, Union
-import random, logging
-from itertools import groupby, product, chain, combinations, zip_longest
+from typing import List, Tuple, Dict, Iterable, Union
+import logging
 from collections import Counter
-from abc import ABC, abstractmethod
+from abc import ABC
 
 import numpy
-from scipy.stats import pearsonr
-from pyitlib import discrete_random_variable as drv
 from netzob.Model.Vocabulary.Messages.AbstractMessage import AbstractMessage
 from netzob.Model.Vocabulary.Messages.L2NetworkMessage import L2NetworkMessage
-from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
 
-from nemere.inference.segments import TypedSegment
-
-from fieldhunter.utils.base import qrAssociationCorrelation, verticalByteMerge, mutualInformationNormalized, \
-    list2ranges, Flows, NgramIterator, iterateSelected, intsFromNgrams, \
-    ngramIsOverlapping, pyitNgramEntropy
-from fieldhunter.inference.fieldtypes import NonConstantNonRandomEntropyFieldType, FieldType, Accumulator
+from fieldhunter.utils.base import Flows
+from fieldhunter.inference.fieldtypes import NonConstantNonRandomEntropyFieldType, Accumulator
 import fieldhunter.inference.fieldtypes as fieldtypes
 
 
@@ -101,8 +93,6 @@ class CategoricalCorrelatedField(fieldtypes.CategoricalCorrelatedField,ABC):
 
     Enhancement of fieldtypes.CategoricalCorrelatedField to iteratively check n-grams from size four to one.
     """
-    # correlationThresh = 0.8  # Reduced from 0.9 (FH, Sec. 3.2.3)
-
     @classmethod
     def correlate(cls, messages: List[L2NetworkMessage], n: int = 4):
         """
@@ -129,7 +119,7 @@ class CategoricalCorrelatedField(fieldtypes.CategoricalCorrelatedField,ABC):
                 for nOff in range(offset, offset+n):  # check/set the correlation for ALL bytes of this n-gram
                     if categoricalCorrelation[nOff] < corr:
                         categoricalCorrelation[nOff] = corr
-            corRepr = [f"{cc:.3f}" for cc in categoricalCorrelation]
+            corRepr = [round(cc,3) for cc in categoricalCorrelation]
             logging.getLogger(__name__).debug(f"Correlation of {n}-ngrams: {corRepr}")
         return categoricalCorrelation
 
@@ -138,30 +128,9 @@ class CategoricalCorrelatedField(fieldtypes.CategoricalCorrelatedField,ABC):
         """
         The correlation is perfect if null values are omitted
 
-        >>> ngrand = [b'\xa2\xe7',
-        ...           b'r\x06',
-        ...           b'\x0f?',
-        ...           b'd\x8a',
-        ...           b'\xa0X',
-        ...           b'\x04\xba',
-        ...           b'\x19r',
-        ...           b'\x17M',
-        ...           b',\xda',
-        ...           b'9K',
-        ...           b'<3',
-        ...           b'\xaa\xdf']
-        >>> valRnd = ['0.601',
-        ...           '0.601',
-        ...           '0.601',
-        ...           '0.601',
-        ...           '0.804',
-        ...           '0.804',
-        ...           '0.804',
-        ...           '0.804',
-        ...           '0.804',
-        ...           '0.792',
-        ...           '0.731',
-        ...           '0.722']
+        >>> ngrand = [b'\xa2\xe7', b'r\x06', b'\x0f?', b'd\x8a', b'\xa0X', b'\x04\xba', b'\x19r', b'\x17M', b',\xda',
+        ...           b'9K', b'<3', b'\xaa\xdf']
+        >>> valRnd = [0.601, 0.601, 0.601, 0.601, 0.804, 0.804, 0.804, 0.804, 0.804, 0.792, 0.731, 0.722]
         >>> from fieldhunter.inference.fieldtypesRelaxed import CategoricalCorrelatedField
         >>> CategoricalCorrelatedField._combineNgrams2Values(ngrand, valRnd)
 
@@ -241,74 +210,54 @@ class TransID(fieldtypes.TransID):
     # n-gram size is not explicitly given in FH, but the description (merging, sharp drops in entropy in Fig. 6)
     #   leads to assuming it should be 1.
     n = 1
-    entropyThresh = 0.8  # Value not given in FH!
-    # entropy in c2s/s2c + flows: threshold for high entropy is not given in FH! Use value determined
-    #   by own empirics in base.entropyThresh
 
-    def _verticalAndHorizontalRandomNgrams(self):
-        """
-        Determine n-grams that are "random across vertical and horizontal collections" (FH, Sec. 3.2.5).
+    entropyThresh = 0.8
+    """
+    This Value not given in FH! We improve the threshold compared to the paper 
+    by using it as factor for relative entropy amongst all entropies in the collection.
+    """
 
-        Output is written to self._c2sCombinedOffsets and self._s2cCombinedOffsets.
-        Moreover, intermediate results are persisted in instance attributes for evaluation.
-        """
-        # vertical collections
-        c2s, s2c = self._flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
-        self._c2sEntropyFiltered = type(self).entropyFilteredOffsets(c2s)
-        self._s2cEntropyFiltered = type(self).entropyFilteredOffsets(s2c)
-        # print('_c2sEntropyFiltered')
-        # pprint(self._c2sEntropyFiltered)
-        # print('_s2cEntropyFiltered')
-        # pprint(self._s2cEntropyFiltered)
+    absoluteEntropy = False
 
-        # # horizontal collections: intermediate entropy of n-grams for debugging
-        # self._c2sConvsEntropy = dict()
-        # for key, conv in self._flows.c2sInConversations().items():
-        #     self._c2sConvsEntropy[key] = pyitNgramEntropy(conv, type(self).n)
-        # self._s2cConvsEntropy = dict()
-        # for key, conv in self._flows.s2cInConversations().items():
-        #     self._s2cConvsEntropy[key] = pyitNgramEntropy(conv, type(self).n)
-        # print('_c2sConvsEntropy')
-        # pprint(self._c2sConvsEntropy)
-        # print('_s2cConvsEntropy')
-        # pprint(self._s2cConvsEntropy)
+    convLenOneThresh = 0.9
 
-        # horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
-        for key, conv in self._flows.c2sInConversations().items():
-            # The entropy is too low if the number of specimens is low -> relative to max
-            # and ignore conversations of length 1
-            # (TODO FH does not specify, but probably require even longer conversations to observe
-            #   that the ID changes for each request/reply pair?
-            #   "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
-            if len(conv) <= 1:
-                continue
-            self._c2sConvsEntropyFiltered[key] = type(self).entropyFilteredOffsets(conv, False)
-        for key, conv in self._flows.s2cInConversations().items():
-            # The entropy is too low if the number of specimens is low -> relative to max
-            # and ignore conversations of length 1
-            # (TODO FH does not specify, but probably require even longer conversations to observe
-            #   that the ID changes for each request/reply pair?
-            #   "Transaction ID" in DHCP is a FP, since it is actually a Session-ID)
-            if len(conv) <= 1:
-                continue
-            self._s2cConvsEntropyFiltered[key] = type(self).entropyFilteredOffsets(conv, False)
-        # print('_c2sConvsEntropyFiltered')
-        # pprint(_c2sConvsEntropyFiltered)
-        # print('_s2cConvsEntropyFiltered')
-        # pprint(_s2cConvsEntropyFiltered)
+    minConversationLenth = 2
+    """
+    For the horizontal entropy require conversations longer than this amount of message exchanges to observe that the  
+    ID changes for each request/reply pair and not is Session-ID/Cookie of some sort.
+    I. e., "Transaction ID" in DHCP would be a FP, since despite its name it is actually a Session-ID)
+    """
 
-        # intersection of all c2s and s2c filtered offset lists (per flow)
-        c2sOffsetLists = [set(offsetlist) for offsetlist in self._c2sConvsEntropyFiltered.values()]
-        self._c2sHorizontalOffsets = set.intersection(*c2sOffsetLists) if len(c2sOffsetLists) > 0 else set()
-        s2cOffsetLists = [set(offsetlist) for offsetlist in self._s2cConvsEntropyFiltered.values()]
-        self._s2cHorizontalOffsets = set.intersection(*s2cOffsetLists) if len(s2cOffsetLists) > 0 else set()
-        # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _c2sConvsEntropyFiltered
-        # (TODO alternatively, deviating from FH, use the offset for each query specifically?)
-        self._c2sCombinedOffsets = self._c2sHorizontalOffsets.intersection(self._c2sEntropyFiltered)
-        # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _s2cConvsEntropyFiltered
-        # (TODO alternatively, deviating from FH, use the entry for each response specifically?)
-        self._s2cCombinedOffsets = self._s2cHorizontalOffsets.intersection(self._s2cEntropyFiltered)
+    # In _verticalAndHorizontalRandomNgrams(self):
+    # for the _c2sCombinedOffsets
+    # (TODO alternatively, deviating from FH, use the offset for each query specifically?)
+    # and _s2cCombinedOffsets
+    # (TODO alternatively, deviating from FH, use the entry for each response specifically?)
+    # This would allow offsets for different message types, but would require to compare values using _constantQRvalues
+    # with the specific offsets per Q/R pair. ==> Future Work
 
+    @classmethod
+    def _horizontalRandomNgrams(cls, conversions: Dict[tuple, List[AbstractMessage]],
+                                verticalEntropyFiltered: List[int]) -> Dict[Union[Tuple, None], List[int]]:
+        # With a conversation length of one, no meaningful horizontal entropy can be calculated (see DNS)
+        convLens = Counter([len(c) for c in conversions.values()])
+        lenOneRatio = convLens[1] / sum(convLens.values())
+
+        # New compared to original FH:
+        # If most conversations (convLenOneThresh) are just one message long per direction (e. g. DNS),
+        # ignore the horizontal entropy filter
+        if lenOneRatio > .9:
+            return {None: verticalEntropyFiltered}
+        else:
+            filteredOutput = dict()
+            # horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
+            for key, conv in conversions.items():
+                # The horizontal entropy is too low if the number of specimens is low
+                #   -> Enhancing over FH, we use the threshold as a relative to max and ignore short conversations
+                if len(conv) < cls.minConversationLenth:
+                    continue
+                filteredOutput[key] = cls.entropyFilteredOffsets(conv, cls.absoluteEntropy)
+            return filteredOutput
 
 
 # Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence

@@ -1,11 +1,11 @@
 """
 This script provides statistics about the given PCAP trace that have impact on the FieldHunter inference.
 """
-from argparse import ArgumentParser
-
-import logging
+import IPython, logging
 from tabulate import tabulate
-import IPython
+from argparse import ArgumentParser
+from os.path import join
+import matplotlib.pyplot as plt
 
 from nemere.utils.loader import SpecimenLoader
 from nemere.utils.evaluationHelpers import StartupFilecheck, reportFolder
@@ -72,6 +72,32 @@ if __name__ == '__main__':
     #         keyfunc = lambda m: len(m.data)
     #         msgbylen = {k: v for k, v in groupby(sorted(direction, key=keyfunc), keyfunc)}
     # # # # # # # # # # # # # # # # # #
+
+
+
+    # # # # # # # # # # # # # # # # # #
+    # Entropy plots: Relevant for MSG-Type and Trans-ID
+    c2s, s2c = flows.splitDirections()
+    c2sEntropy = pyitNgramEntropy(c2s, 1)
+    s2cEntropy = pyitNgramEntropy(s2c, 1)
+    fig: plt.Figure
+    ax1: plt.Axes
+    fig, (ax1, ax2) = plt.subplots(2,1,figsize=(6,6))
+    for ax, entropy in [(ax1, c2sEntropy), (ax2, s2cEntropy)]:
+        if len(entropy) > 0:
+            ax.stem(entropy, use_line_collection=True)
+        else:
+            ax.text(1, .5, "no entries")
+            ax.set_xlim(0, 32)
+        ax.set_ylim(0.,1.)
+        ax.grid(which="major", axis="y")
+        ax.set_xlabel("byte offset")
+        ax.set_ylabel("normalized entropy")
+    plt.suptitle("Entropies per byte offset", fontsize="x-large")
+    ax1.set_title("Client to Server Collection")
+    ax2.set_title("Server to Client Collection")
+    fig.tight_layout(rect=[0,0,1,.95])
+    fig.savefig(join(reportFolder, filechecker.pcapstrippedname + ".pdf"))
 
 
     # interactive

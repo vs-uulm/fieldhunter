@@ -86,7 +86,7 @@ class NonConstantNonRandomEntropyFieldType(FieldType, ABC):
     def entropyFilteredOffsets(cls, messages: List[AbstractMessage], n: int):
         """
         Find offsets of n-grams (with the same offset in different messages of the list), that are not constant and not
-        random, i. e., that have a entropy > 0 and < x (threshold)
+        random, i. e., that have an entropy between and cls.entropyThresh.
 
         FH, Section 3.2.1
 
@@ -563,9 +563,12 @@ class TransID(FieldType):
     # n-gram size is not explicitly given in FH, but the description (merging, sharp drops in entropy in Fig. 6)
     #   leads to assuming it should be 1.
     n = 1
-    entropyThresh = 0.8  # Value not given in FH!
-    # entropy in c2s/s2c + flows: threshold for high entropy is not given in FH! Use value determined
-    #   by own empirics in base.entropyThresh
+    entropyThresh = 0.6  # Value is not given in FH paper!
+    """
+    entropy in c2s/s2c + flows: threshold for high entropy is not given in FH!
+    We use value determined by own empirics: see entropy plots from src/trace_statistics.py
+    """
+    absoluteEntropy = True
 
     def __init__(self, flows: Flows):
         super().__init__()
@@ -601,8 +604,8 @@ class TransID(FieldType):
     @classmethod
     def entropyFilteredOffsets(cls, messages: List[AbstractMessage], absolute=True):
         """
-        Find offsets of n-grams (with the same offset in different messages of the list), that are random,
-        i. e., that have a entropy > x (threshold)
+        Find offsets of n-grams (with the same offset in different messages of the list) that are random,
+        i. e., that have a entropy greater than entropyThresh (cls.entropyThresh or relative).
 
         FH, Section 3.2.5
 
@@ -622,16 +625,15 @@ class TransID(FieldType):
         Output is written to self._c2sCombinedOffsets and self._s2cCombinedOffsets.
         Moreover, intermediate results are persisted in instance attributes for evaluation.
         """
+        logger = logging.getLogger(__name__)
         # vertical collections
         c2s, s2c = self._flows.splitDirections()  # type: List[L4NetworkMessage], List[L4NetworkMessage]
-        self._c2sEntropyFiltered = type(self).entropyFilteredOffsets(c2s)
-        self._s2cEntropyFiltered = type(self).entropyFilteredOffsets(s2c)
-        # print('_c2sEntropyFiltered')
-        # pprint(self._c2sEntropyFiltered)
-        # print('_s2cEntropyFiltered')
-        # pprint(self._s2cEntropyFiltered)
+        self._c2sEntropyFiltered = type(self).entropyFilteredOffsets(c2s, type(self).absoluteEntropy)
+        self._s2cEntropyFiltered = type(self).entropyFilteredOffsets(s2c, type(self).absoluteEntropy)
+        logger.info(f"c2sEntropyFiltered offsets: {self._c2sEntropyFiltered}")
+        logger.info(f"s2cEntropyFiltered offsets: {self._s2cEntropyFiltered}")
 
-        # # horizontal collections: intermediate entropy of n-grams for debugging
+        # # DEBUGGING horizontal collections: intermediate entropy of n-grams
         # self._c2sConvsEntropy = dict()
         # for key, conv in self._flows.c2sInConversations().items():
         #     self._c2sConvsEntropy[key] = pyitNgramEntropy(conv, type(self).n)
@@ -642,38 +644,45 @@ class TransID(FieldType):
         # pprint(self._c2sConvsEntropy)
         # print('_s2cConvsEntropy')
         # pprint(self._s2cConvsEntropy)
-
+        #
         # horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
-        for key, conv in self._flows.c2sInConversations().items():
-            # The entropy is too low if the number of specimens is low -> relative to max
-            # and ignore conversations of length 1
-            if len(conv) <= 1:
-                continue
-            self._c2sConvsEntropyFiltered[key] = type(self).entropyFilteredOffsets(conv, False)
-        for key, conv in self._flows.s2cInConversations().items():
-            # The entropy is too low if the number of specimens is low -> relative to max
-            # and ignore conversations of length 1
-            if len(conv) <= 1:
-                continue
-            self._s2cConvsEntropyFiltered[key] = type(self).entropyFilteredOffsets(conv, False)
-        # print('_c2sConvsEntropyFiltered')
-        # pprint(_c2sConvsEntropyFiltered)
-        # print('_s2cConvsEntropyFiltered')
-        # pprint(_s2cConvsEntropyFiltered)
+        self._c2sConvsEntropyFiltered = type(self)._horizontalRandomNgrams(
+            self._flows.c2sInConversations(), self._c2sEntropyFiltered)
+        self._s2cConvsEntropyFiltered = type(self)._horizontalRandomNgrams(
+            self._flows.s2cInConversations(), self._s2cEntropyFiltered)
+        logger.info('c2sConvsEntropyFiltered: ' + repr(self._c2sConvsEntropyFiltered.values()))
+        logger.info('s2cConvsEntropyFiltered: ' + repr(self._s2cConvsEntropyFiltered.values()))
 
         # intersection of all c2s and s2c filtered offset lists (per flow)
         c2sOffsetLists = [set(offsetlist) for offsetlist in self._c2sConvsEntropyFiltered.values()]
         self._c2sHorizontalOffsets = set.intersection(*c2sOffsetLists) if len(c2sOffsetLists) > 0 else set()
         s2cOffsetLists = [set(offsetlist) for offsetlist in self._s2cConvsEntropyFiltered.values()]
         self._s2cHorizontalOffsets = set.intersection(*s2cOffsetLists) if len(s2cOffsetLists) > 0 else set()
+
         # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _c2sConvsEntropyFiltered
         self._c2sCombinedOffsets = self._c2sHorizontalOffsets.intersection(self._c2sEntropyFiltered)
         # offsets in _c2sEntropyFiltered where the offset is also in all of the lists of _s2cConvsEntropyFiltered
         self._s2cCombinedOffsets = self._s2cHorizontalOffsets.intersection(self._s2cEntropyFiltered)
 
+    @classmethod
+    def _horizontalRandomNgrams(cls, conversions: Dict[tuple, List[AbstractMessage]],
+                                verticalEntropyFiltered: List[int]) -> Dict[Union[Tuple, None], List[int]]:
+        """
+        Filter in offsets that are random horizontally
+
+        :param conversions:
+        :param verticalEntropyFiltered:
+        :return:
+        """
+        filteredOutput = dict()
+        # horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
+        for key, conv in conversions.items():
+            filteredOutput[key] = cls.entropyFilteredOffsets(conv, cls.absoluteEntropy)
+        return filteredOutput
+
     def _constantQRvalues(self):
         """
-        Reqest/Response pairs: search for n-grams with constant values (differing offsets allowed)
+        Request/Response pairs: search for n-grams with constant values (differing offsets allowed)
 
         Output is placed in self._valuematch.
         """
