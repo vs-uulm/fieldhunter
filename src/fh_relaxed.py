@@ -59,32 +59,21 @@ if __name__ == '__main__':
     print("Inferring", MSGlen.typelabel)
     msglenfields = MSGlen(flows)
 
-    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-    # # # TODO Working area
-    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
-    # print(tabulate(list(msglenfields.acceptedCandidatesPerDir[0].items()) + ["--"]
-    #                + list(msglenfields.acceptedCandidatesPerDir[1].items())))
-
     # Host-ID
     print("Inferring", HostID.typelabel)
     hostidfields = HostID(messages)
-    # print(HostID.catCorrPosLen(hostidfields.categoricalCorrelation))
 
     # Session-ID (FH, Section 3.2.4)
     print("Inferring", SessionID.typelabel)
     sessionidfields = SessionID(messages)
-    # print(HostID.catCorrPosLen(sessionidfields.categoricalCorrelation))
 
     # Trans-ID (FH, Section 3.2.5)
     print("Inferring", TransID.typelabel)
     transidfields = TransID(flows)
-    # pprint(transidfields.segments)
 
     # Accumulators (FH, Section 3.2.6)
     print("Inferring", Accumulator.typelabel)
     accumulatorfields = Accumulator(flows)
-    # pprint(accumulatorfields.segments)
 
     # in order of fieldtypes.precedence!
     sortedInferredTypes = sorted(
