@@ -40,10 +40,6 @@ class MSGlen(fieldtypes.MSGlen):
 
     see ..fieldtypes.MSGlen
     """
-    # coefficient threshold 0.6 (FH, Section 3.2.2)
-    minCorrelation = 0.6
-    # MSG-Len hypothesis threshold 0.9 (FH, Section 3.2.2)
-    lenhypoThresh = 0.9
 
     def __init__(self, flows: Flows):
         super(NonConstantNonRandomEntropyFieldType, self).__init__()
@@ -220,8 +216,6 @@ class SessionID(CategoricalCorrelatedField, fieldtypes.SessionID):
     A problem similar to Host-ID's leads to the same bad quality, thus, we apply the same change via the relaxed
     super-class CategoricalCorrelatedField.
     """
-    # correlationThresh = 0.8  # Reduced from 0.9 (FH, Sec. 3.2.3)
-
     @classmethod
     def _filterMessages(cls, messages: List[L4NetworkMessage]):
         ignoreList = {b"\x00"*4, b"\xff"*4}
