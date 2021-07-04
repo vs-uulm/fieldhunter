@@ -11,9 +11,9 @@ from abc import ABC
 
 import numpy
 from netzob.Model.Vocabulary.Messages.AbstractMessage import AbstractMessage
-from netzob.Model.Vocabulary.Messages.L2NetworkMessage import L2NetworkMessage
+from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
 
-from fieldhunter.utils.base import Flows
+from fieldhunter.utils.base import Flows, intsFromNgrams
 from fieldhunter.inference.fieldtypes import NonConstantNonRandomEntropyFieldType, Accumulator
 import fieldhunter.inference.fieldtypes as fieldtypes
 
@@ -38,7 +38,7 @@ class MSGlen(fieldtypes.MSGlen):
     """
     Relaxed version of message length (MSG-Len) inference (FH, Section 3.2.2, Fig. 3 center).
 
-    see .fieldtypes.MSGlen
+    see ..fieldtypes.MSGlen
     """
     # coefficient threshold 0.6 (FH, Section 3.2.2)
     minCorrelation = 0.6
@@ -94,7 +94,7 @@ class CategoricalCorrelatedField(fieldtypes.CategoricalCorrelatedField,ABC):
     Enhancement of fieldtypes.CategoricalCorrelatedField to iteratively check n-grams from size four to one.
     """
     @classmethod
-    def correlate(cls, messages: List[L2NetworkMessage], n: int = 4):
+    def correlate(cls, messages: List[L4NetworkMessage], nMax: int = 4):
         """
         Generate n-grams with n's from large to small
         at the same offsets for each message an correlate each n-gram using categorical correlation.
@@ -103,11 +103,11 @@ class CategoricalCorrelatedField(fieldtypes.CategoricalCorrelatedField,ABC):
         see HostID for the rationale of this enhancement over FH.
 
         :param messages: Messages to generate n-grams to correlate to.
-        :param n: maximum of n to correlate from large to small
+        :param nMax: maximum of n to correlate from large to small
         :return: Correlation values for each offset of n-grams generated from the messages.
         """
         categoricalCorrelation = None
-        for n in range(4,0,-1):
+        for n in range(nMax,0,-1):
             # this is one correlation value for each n-gram starting at the offset
             corrAtOffset = super().correlate(messages, n)
             if categoricalCorrelation is None:  # initial fill
@@ -125,7 +125,7 @@ class CategoricalCorrelatedField(fieldtypes.CategoricalCorrelatedField,ABC):
 
     @classmethod
     def _combineNgrams2Values(cls, ngrams: Iterable[bytes], values: List[int]):
-        """
+        r"""
         The correlation is perfect if null values are omitted
 
         >>> ngrand = [b'\xa2\xe7', b'r\x06', b'\x0f?', b'd\x8a', b'\xa0X', b'\x04\xba', b'\x19r', b'\x17M', b',\xda',
@@ -133,6 +133,13 @@ class CategoricalCorrelatedField(fieldtypes.CategoricalCorrelatedField,ABC):
         >>> valRnd = [0.601, 0.601, 0.601, 0.601, 0.804, 0.804, 0.804, 0.804, 0.804, 0.792, 0.731, 0.722]
         >>> from fieldhunter.inference.fieldtypesRelaxed import CategoricalCorrelatedField
         >>> CategoricalCorrelatedField._combineNgrams2Values(ngrand, valRnd)
+        array([[4.1703e+04, 2.9190e+04, 3.9030e+03, 2.5738e+04, 4.1048e+04,
+                1.2100e+03, 6.5140e+03, 5.9650e+03, 1.1482e+04, 1.4667e+04,
+                1.5411e+04, 4.3743e+04],
+               [6.0100e-01, 6.0100e-01, 6.0100e-01, 6.0100e-01, 8.0400e-01,
+                8.0400e-01, 8.0400e-01, 8.0400e-01, 8.0400e-01, 7.9200e-01,
+                7.3100e-01, 7.2200e-01]])
+
 
         """
         nonNull = list(zip(*filter(lambda x: set(x[0]) != {0}, zip(ngrams, values))))
@@ -186,17 +193,56 @@ class HostID(CategoricalCorrelatedField, fieldtypes.HostID):
 
 
 class SessionID(CategoricalCorrelatedField, fieldtypes.SessionID):
-    """
+    r"""
     Relaxed version of session identifier (Session-ID) inference (FH, Section 3.2.4)
     Find n-gram that is strongly correlated with IP addresses of sender and receiver
     using categorical correlation like Host-ID.
 
     see fieldtypes.SessionID
 
+    >>> from fieldhunter.inference.fieldtypesRelaxed import SessionID
+    >>> from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
+    >>> messages = [
+    ...     L4NetworkMessage(b"session111\x42\x17\x23\x00\x08\x15",
+    ...         l3SourceAddress="1.2.3.100", l3DestinationAddress="1.2.3.1"),
+    ...     L4NetworkMessage(b"session111\xe4\x83\x82\x85\xbf",
+    ...         l3SourceAddress="1.2.3.1", l3DestinationAddress="1.2.3.100"),
+    ...     L4NetworkMessage(b"session111\x23\x17\xf9\x0b\x00b\x12",
+    ...         l3SourceAddress="1.2.3.100", l3DestinationAddress="1.2.3.1"),
+    ...     L4NetworkMessage(b"session222\x42\x17Jk\x8a1e\xb5",
+    ...         l3SourceAddress="1.2.3.2", l3DestinationAddress="1.2.3.100"),
+    ...     L4NetworkMessage(b"session222L\xab\x83\x1a\xef\x13",
+    ...         l3SourceAddress="1.2.3.100", l3DestinationAddress="1.2.3.2"),
+    ... ]
+    >>> SessionID.correlate(messages)
+    [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.4181656600790516, 0.4181656600790516, 0.4181656600790516, 0.5, 0.5]
+
     A problem similar to Host-ID's leads to the same bad quality, thus, we apply the same change via the relaxed
     super-class CategoricalCorrelatedField.
     """
-    # correlationThresh = 0.5  # Reduced from 0.9 (FH, Sec. 3.2.3)
+    # correlationThresh = 0.8  # Reduced from 0.9 (FH, Sec. 3.2.3)
+
+    @classmethod
+    def _filterMessages(cls, messages: List[L4NetworkMessage]):
+        ignoreList = {b"\x00"*4, b"\xff"*4}
+        logging.getLogger(__name__).debug("Ignoring non-set and broadcast addresses.")
+        return [messages for messages, srcDst in zip(messages, cls._srcDstBytes(messages))
+                if ignoreList.isdisjoint(srcDst)]
+
+    @classmethod
+    def _values2correlate2(cls, messages: List[L4NetworkMessage]):
+        """
+        Get source AND destination addresses in the same manner as (just) the source for Host-ID.
+        Recover byte representations of the IPv4 addresses from all Netzob messages and make one int out if each.
+
+        Compared to the original FH paper, treat source and destination IPs as set,
+        ignoring their role as denoting sender of receiver, but only interpreting them as equal participants.
+
+        :param messages: Messages to generate n-grams to correlate to.
+        :return: integer representation of source and destination addresses for each message.
+        """
+        participantPairs = [sorted(srcDst) for srcDst in cls._srcDstBytes(messages)]
+        return intsFromNgrams(a+b for a,b in participantPairs)
 
 
 class TransID(fieldtypes.TransID):
@@ -205,13 +251,7 @@ class TransID(fieldtypes.TransID):
 
     see fieldtypes.TransID
     """
-    transSupportThresh = 0.8  # enough support in conversations (FH, Sec. 3.2.5)
-    minFieldLength = 2  # merged n-grams must at least be this amount of bytes long
-    # n-gram size is not explicitly given in FH, but the description (merging, sharp drops in entropy in Fig. 6)
-    #   leads to assuming it should be 1.
-    n = 1
-
-    entropyThresh = 0.8
+    entropyThresh = 0.6
     """
     This Value not given in FH! We improve the threshold compared to the paper 
     by using it as factor for relative entropy amongst all entropies in the collection.
@@ -221,7 +261,7 @@ class TransID(fieldtypes.TransID):
 
     convLenOneThresh = 0.9
 
-    minConversationLenth = 2
+    minConversationLength = 2
     """
     For the horizontal entropy require conversations longer than this amount of message exchanges to observe that the  
     ID changes for each request/reply pair and not is Session-ID/Cookie of some sort.
@@ -239,26 +279,28 @@ class TransID(fieldtypes.TransID):
     @classmethod
     def _horizontalRandomNgrams(cls, conversions: Dict[tuple, List[AbstractMessage]],
                                 verticalEntropyFiltered: List[int]) -> Dict[Union[Tuple, None], List[int]]:
-        # With a conversation length of one, no meaningful horizontal entropy can be calculated (see DNS)
-        convLens = Counter([len(c) for c in conversions.values()])
-        lenOneRatio = convLens[1] / sum(convLens.values())
+        if len(conversions) > 0:
+            # With a conversation length of one, no meaningful horizontal entropy can be calculated (see DNS)
+            convLens = Counter([len(c) for c in conversions.values()])
+            lenOneRatio = convLens[1] / sum(convLens.values())
 
-        # New compared to original FH:
-        # If most conversations (convLenOneThresh) are just one message long per direction (e. g. DNS),
-        # ignore the horizontal entropy filter
-        if lenOneRatio > .9:
-            return {None: verticalEntropyFiltered}
+            # New compared to original FH:
+            # If most conversations (convLenOneThresh) are just one message long per direction (e. g. DNS),
+            # ignore the horizontal entropy filter
+            if lenOneRatio > .9:
+                return {None: verticalEntropyFiltered}
+            else:
+                filteredOutput = dict()
+                # horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
+                for key, conv in conversions.items():
+                    # The horizontal entropy is too low if the number of specimens is low
+                    #   -> Enhancing over FH, we use the threshold as a relative to max and ignore short conversations
+                    if len(conv) < cls.minConversationLength:
+                        continue
+                    filteredOutput[key] = cls.entropyFilteredOffsets(conv, cls.absoluteEntropy)
+                return filteredOutput
         else:
-            filteredOutput = dict()
-            # horizontal collections: entropy of n-gram per the same offset in all messages of one flow direction
-            for key, conv in conversions.items():
-                # The horizontal entropy is too low if the number of specimens is low
-                #   -> Enhancing over FH, we use the threshold as a relative to max and ignore short conversations
-                if len(conv) < cls.minConversationLenth:
-                    continue
-                filteredOutput[key] = cls.entropyFilteredOffsets(conv, cls.absoluteEntropy)
-            return filteredOutput
-
+            return {}
 
 # Host-ID will always return a subset of Session-ID fields, so Host-ID should get precedence
 # MSG-Len would be overwritten by MSG-Type (see SMB: nbss.length), so first use MSG-Len

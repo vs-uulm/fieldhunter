@@ -1,7 +1,9 @@
 """
 This script provides statistics about the given PCAP trace that have impact on the FieldHunter inference.
 """
+# noinspection PyUnresolvedReferences
 import IPython, logging
+# noinspection PyUnresolvedReferences
 from tabulate import tabulate
 from argparse import ArgumentParser
 from os.path import join
@@ -65,15 +67,12 @@ if __name__ == '__main__':
               ([filechecker.pcapstrippedname, *row] for row in gtTypeAndLengthEntropies if not numpy.isnan(row[-1])))
     # # # # # # # # # # # # # # # # # #
 
-
     # # # # # # # # # # # # # # # # # #
     # Relevant for MSG-Len
     # TODO length of messages, something like:
     #         keyfunc = lambda m: len(m.data)
     #         msgbylen = {k: v for k, v in groupby(sorted(direction, key=keyfunc), keyfunc)}
     # # # # # # # # # # # # # # # # # #
-
-
 
     # # # # # # # # # # # # # # # # # #
     # Entropy plots: Relevant for MSG-Type and Trans-ID
@@ -98,7 +97,36 @@ if __name__ == '__main__':
     ax2.set_title("Server to Client Collection")
     fig.tight_layout(rect=[0,0,1,.95])
     fig.savefig(join(reportFolder, filechecker.pcapstrippedname + ".pdf"))
+    # # # # # # # # # # # # # # # # # #
 
+    # # # # # # # # # # # # # # # # # #
+    # DHCP "Transaction ID" that is a FH Session-ID
+    if "dhcp" in specimens.pcapFileName:
+        sessIDtuples = sorted( (
+            (comparator.parsedMessages[specimens.messagePool[msg]].getValuesByName('dhcp.id')[0],
+            msg.source.rpartition(':')[0], msg.destination.rpartition(':')[0]) for msg in messages),
+            key = lambda x: x[0] )
+        participantsTuples = [(a, *sorted([b, c])) for a, b, c in sessIDtuples]
+        field2value = [(
+            intsFromNgrams([bytes.fromhex(a)])[0],
+            intsFromNgrams([bytes(map(int, b.split(".") + c.split(".")))])[0])
+            for a, b, c in participantsTuples]
+        ngSc = numpy.array(list(zip(*field2value)))
+        catCorr = drv.information_mutual(ngSc[0], ngSc[1]) / drv.entropy_joint(ngSc)
+        print(catCorr)
+        # 0.5073953157493724
+        # For dhcp_SMIA2011101X_deduped-1000.pcap this is just about .5 which is quite surprising.
+        ignoreList = {"0.0.0.0", "255.255.255.255"}
+        field2value = [(
+            intsFromNgrams([bytes.fromhex(a)])[0],
+            intsFromNgrams([bytes(map(int, b.split(".") + c.split(".")))])[0])
+            for a, b, c in participantsTuples if b not in ignoreList and c not in ignoreList and a != "00000000"]
+        ngSc = numpy.array(list(zip(*field2value)))
+        catCorr = drv.information_mutual(ngSc[0], ngSc[1]) / drv.entropy_joint(ngSc)
+        print(catCorr)
+        # 0.566225418688138
+        # Ignoring some trivial cases raises the correlation only marginally.
+    # # # # # # # # # # # # # # # # # #
 
     # interactive
     if args.interactive:

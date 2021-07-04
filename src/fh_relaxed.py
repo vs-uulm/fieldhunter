@@ -126,9 +126,6 @@ if __name__ == '__main__':
         infieldReport.addXLworksheet(infieldWorkbook, FieldTypeReport.ovTitle)
     FieldTypeReport.saveWorkbook(infieldWorkbook, filechecker.pcapstrippedname)
 
-    # TODO derive an "improved" implementation:
-    #  address the todos in module fieldtypesRelaxed
-
     # interactive
     if args.interactive:
         print("""

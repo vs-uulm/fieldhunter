@@ -419,13 +419,37 @@ class CategoricalCorrelatedField(FieldType,ABC):
     """
     Abstract class for inferring field types using categorical correlation of n-gram values with external values, e. g.,
     environmental information like addresses from encapsulation.
+
+    CategoricalCorrelatedField#correlate() uses #_values2correlate2() to determine what to correlate.
+    This is different for the subclasses (HostID, SessionID). It iterates the n-grams (n=1) and creates
+    n-grams-to-source-IP-tuples for Host-ID or (n-grams,(source IP,destination IP))-tuples for Session-ID.
+    It correlates the n-grams to the respective tuple by calculating the catCorr for the
+    n-gram and the source/destination tuple.
     """
     correlationThresh = 0.9  # 0.9, threshold for correlation between host ID and IP address(es) (FH, Sec. 3.2.3)
     minLenThresh = 4  # host ID fields must at least be 4 bytes long (FH, Sec. 3.2.3)
 
+    def __init__(self, messages: List[L4NetworkMessage]):
+        super().__init__()
+        self._messages = messages
+        filteredMessages = type(self)._filterMessages(messages)
+        # We correlate only the filtered messages...
+        self._categoricalCorrelation = type(self).correlate(filteredMessages)
+        self._catCorrPosLen = type(self).catCorrPosLen(self._categoricalCorrelation)
+        # ... but use the positions to generate segments for all messages. This might not always be wise.
+        self._segments = type(self)._posLen2segments(self._messages, self._catCorrPosLen)
+
+    @classmethod
+    def _filterMessages(cls, messages: List[L4NetworkMessage]):
+        """
+        Filter messages used to correlate in the first place. To be overwritten by subclasses.
+        This basic implementation passes the input list unchanged.
+        """
+        return messages
+
     @classmethod
     @abstractmethod
-    def _values2correlate2(cls, messages: List[L2NetworkMessage]):
+    def _values2correlate2(cls, messages: List[L4NetworkMessage]) -> List[int]:
         """
         Implement to determine the external values to correlate the n-grams of messages with.
 
@@ -435,11 +459,29 @@ class CategoricalCorrelatedField(FieldType,ABC):
         raise NotImplementedError("Implement this abstract class method in a subclass.")
 
     @classmethod
-    def correlate(cls, messages: List[L2NetworkMessage], n: int = 1):
-        """
+    def correlate(cls, messages: List[L4NetworkMessage], n: int = 1):
+        # noinspection PyShadowingNames
+        r"""
         Generate n-grams at the same offsets for each message an correlate each n-gram using
         categorical correlation: R(x, y) = I(x: y)/H(x, y) \in [0,1]
         Uses cls#n to determine the n-gram sizes and cls#_values2correlate2() to obtain tuples of data to correlate.
+
+        >>> from fieldhunter.inference.fieldtypes import SessionID
+        >>> from netzob.Model.Vocabulary.Messages.L4NetworkMessage import L4NetworkMessage
+        >>> messages = [
+        ...     L4NetworkMessage(b"session111\x42\x17\x23\x00\x08\x15",
+        ...         l3SourceAddress="1.2.3.100", l3DestinationAddress="1.2.3.1"),
+        ...     L4NetworkMessage(b"session111xe4\x83\x82\x85\xbf",
+        ...         l3SourceAddress="1.2.3.100", l3DestinationAddress="1.2.3.1"),
+        ...     L4NetworkMessage(b"session111\x42\x17\xf9\x0b\x00b\x12O",
+        ...         l3SourceAddress="1.2.3.100", l3DestinationAddress="1.2.3.1"),
+        ...     L4NetworkMessage(b"session222\x42\x17Jk\x8a1e\xb5",
+        ...         l3SourceAddress="1.2.3.2", l3DestinationAddress="1.2.3.100"),
+        ...     L4NetworkMessage(b"session222L\xab\x83\x1a\xef\x13",
+        ...         l3SourceAddress="1.2.3.2", l3DestinationAddress="1.2.3.100"),
+        ... ]
+        >>> SessionID.correlate(messages)
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.21851654863632566, 0.21851654863632566, 0.4181656600790516, 0.4181656600790516, 0.4181656600790516, 0.4181656600790516]
 
         :param messages: Messages to generate n-grams to correlate to.
         :param n: Host-ID uses 8-bit/1-byte n-grams according to FH, Sec. 3.1.2, but this does not work well
@@ -481,13 +523,20 @@ class CategoricalCorrelatedField(FieldType,ABC):
 
     @property
     def categoricalCorrelation(self):
-        # !! This attribute needs to be defined in subclass init !!
+        # !! The attribute self._categoricalCorrelation needs to be defined in subclass init !!
         # noinspection PyUnresolvedReferences
         return self._categoricalCorrelation
 
     @classmethod
     def _combineNgrams2Values(cls, ngrams: Iterable[bytes], values: List[int]) -> numpy.ndarray:
         return numpy.array([intsFromNgrams(ngrams), values])
+
+    @classmethod
+    def _srcDstBytes(cls, messages: List[L4NetworkMessage]):
+        return [ (
+            bytes(map(int, msg.source.rpartition(':')[0].split('.'))),
+            bytes(map(int, msg.destination.rpartition(':')[0].split('.')))
+        ) for msg in messages]
 
 
 class HostID(CategoricalCorrelatedField):
@@ -497,21 +546,14 @@ class HostID(CategoricalCorrelatedField):
     """
     typelabel = 'Host-ID'
 
-    def __init__(self, messages: List[L2NetworkMessage]):
-        super().__init__()
-        self._messages = messages
-        self._categoricalCorrelation = type(self).correlate(messages)
-        self._catCorrPosLen = type(self).catCorrPosLen(self._categoricalCorrelation)
-        self._segments = type(self)._posLen2segments(messages, self._catCorrPosLen)
-
     @classmethod
-    def _values2correlate2(cls, messages: List[L2NetworkMessage]):
+    def _values2correlate2(cls, messages: List[L4NetworkMessage]):
         """
         Recover byte representations of the IPv4 addresses from all Netzob messages and make one int out if each.
         :param messages: Messages to generate n-grams to correlate to.
         :return:
         """
-        return intsFromNgrams([bytes(map(int, msg.source.rpartition(':')[0].split('.'))) for msg in messages])
+        return intsFromNgrams(src for src, dst in cls._srcDstBytes(messages))
 
 
 class SessionID(CategoricalCorrelatedField):
@@ -525,20 +567,8 @@ class SessionID(CategoricalCorrelatedField):
     """
     typelabel = 'Session-ID'
 
-    def __init__(self, messages: List[L2NetworkMessage]):
-        super().__init__()
-        self._messages = messages
-        # #correlate() uses #_values2correlate2() to determine what to correlate.
-        #   Thus is iterates the n-grams (n=1) and create (n-grams,(source,destination))-tuples
-        #   (instead of just n-grams to source for Host-ID).
-        # It correlates the n-grams to the (client IP, server IP) tuple by calculating the catCorr for the
-        #   n-gram and the source/destination tuple
-        self._categoricalCorrelation = type(self).correlate(messages)
-        self._catCorrPosLen = type(self).catCorrPosLen(self._categoricalCorrelation)
-        self._segments = type(self)._posLen2segments(messages, self._catCorrPosLen)
-
     @classmethod
-    def _values2correlate2(cls, messages: List[L2NetworkMessage]):
+    def _values2correlate2(cls, messages: List[L4NetworkMessage]):
         """
         Get source AND destination addresses in the same manner as (just) the source for Host-ID.
         Recover byte representations of the IPv4 addresses from all Netzob messages and make one int out if each.
@@ -546,10 +576,7 @@ class SessionID(CategoricalCorrelatedField):
         :param messages: Messages to generate n-grams to correlate to.
         :return: integer representation of source and destination addresses for each message.
         """
-        return intsFromNgrams([bytes(map(int,
-                                         msg.source.rpartition(':')[0].split('.') +
-                                         msg.destination.rpartition(':')[0].split('.'))
-                                     ) for msg in messages])
+        return intsFromNgrams(src+dst for src, dst in cls._srcDstBytes(messages))
 
 
 class TransID(FieldType):
@@ -566,7 +593,7 @@ class TransID(FieldType):
     entropyThresh = 0.6  # Value is not given in FH paper!
     """
     entropy in c2s/s2c + flows: threshold for high entropy is not given in FH!
-    We use value determined by own empirics: see entropy plots from src/trace_statistics.py
+    We use a value determined by own empirics: see entropy plots from src/trace_statistics.py
     """
     absoluteEntropy = True
 
@@ -614,9 +641,12 @@ class TransID(FieldType):
             make it relative to the maximum entropy if False.
         :return: Returns a list of offsets that have non-constant and non-random (below entropyThresh) entropy.
         """
-        entropy = pyitNgramEntropy(messages, cls.n)
-        entropyThresh = cls.entropyThresh if absolute else max(entropy) * cls.entropyThresh
-        return [offset for offset, entropy in enumerate(entropy) if entropy > entropyThresh]
+        if len(messages) > 0:
+            entropy = pyitNgramEntropy(messages, cls.n)
+            entropyThresh = cls.entropyThresh if absolute else max(entropy) * cls.entropyThresh
+            return [offset for offset, entropy in enumerate(entropy) if entropy > entropyThresh]
+        else:
+            return []
 
     def _verticalAndHorizontalRandomNgrams(self):
         """
