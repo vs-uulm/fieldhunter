@@ -212,7 +212,7 @@ class MSGtype(NonConstantNonRandomEntropyFieldType):
 class MSGlen(NonConstantNonRandomEntropyFieldType):
     """
     Message length (MSG-Len) inference (FH, Section 3.2.2, Fig. 3 center).
-    Application message length, linearly correlates with message size.
+    Find values in the message that linearly correlate with the application-layer message size.
 
     Properties enable access to intermediate and final results.
     """

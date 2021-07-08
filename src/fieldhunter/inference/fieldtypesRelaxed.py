@@ -90,20 +90,21 @@ class CategoricalCorrelatedField(fieldtypes.CategoricalCorrelatedField,ABC):
     Enhancement of fieldtypes.CategoricalCorrelatedField to iteratively check n-grams from size four to one.
     """
     @classmethod
-    def correlate(cls, messages: List[L4NetworkMessage], nMax: int = 4):
+    def correlate(cls, messages: List[L4NetworkMessage], nMax: int = 4, nMin: int = 1):
         """
-        Generate n-grams with n's from large to small
+        Generate n-grams with n.s from large to small
         at the same offsets for each message an correlate each n-gram using categorical correlation.
 
         see fieldtypes.CategoricalCorrelatedField#correlate()
         see HostID for the rationale of this enhancement over FH.
 
         :param messages: Messages to generate n-grams to correlate to.
-        :param nMax: maximum of n to correlate from large to small
+        :param nMax: maximum of n to correlate (decrease from large to small)
+        :param nMin: minimum of n to correlate
         :return: Correlation values for each offset of n-grams generated from the messages.
         """
         categoricalCorrelation = None
-        for n in range(nMax,0,-1):
+        for n in range(nMax,nMin+1,-1):
             # this is one correlation value for each n-gram starting at the offset
             corrAtOffset = super().correlate(messages, n)
             if categoricalCorrelation is None:  # initial fill
@@ -135,8 +136,6 @@ class CategoricalCorrelatedField(fieldtypes.CategoricalCorrelatedField,ABC):
                [6.0100e-01, 6.0100e-01, 6.0100e-01, 6.0100e-01, 8.0400e-01,
                 8.0400e-01, 8.0400e-01, 8.0400e-01, 8.0400e-01, 7.9200e-01,
                 7.3100e-01, 7.2200e-01]])
-
-
         """
         nonNull = list(zip(*filter(lambda x: set(x[0]) != {0}, zip(ngrams, values))))
         if len(nonNull) == 0:
