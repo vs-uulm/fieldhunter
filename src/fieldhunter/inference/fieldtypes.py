@@ -25,7 +25,7 @@ from fieldhunter.utils.base import qrAssociationCorrelation, verticalByteMerge, 
     ngramIsOverlapping, pyitNgramEntropy
 
 
-logging.getLogger(__name__).setLevel(logging.DEBUG)
+# logging.getLogger(__name__).setLevel(logging.DEBUG)
 
 
 class FieldType(ABC):

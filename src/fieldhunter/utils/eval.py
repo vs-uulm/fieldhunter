@@ -67,7 +67,7 @@ class FieldTypeReport(object):
             messagetype, fieldname, fieldtype = self._comparator.lookupField(seg)
             overlapValue = "'" + seg.message.data[overlapOffset:overlapEnd].hex() + "'"
 
-            # determine what is a TP/FP using GroundTruth
+            # determine what is a TP (value True)/FP (value False) using GroundTruth
             tpfp = fieldname in GroundTruth.fieldtypes[self.typelabel]
 
             # check the precedence of multiple overlapping inferred fields

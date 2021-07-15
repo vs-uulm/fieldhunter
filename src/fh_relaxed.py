@@ -18,25 +18,32 @@ from nemere.utils.loader import SpecimenLoader
 from nemere.utils.evaluationHelpers import StartupFilecheck
 from nemere.utils.reportWriter import writeReport
 from nemere.validation.dissectorMatcher import MessageComparator, DissectorMatcher
+from nemere.inference.segments import TypedSegment
 
 from fieldhunter.inference.fieldtypesRelaxed import *
 from fieldhunter.inference.common import segmentedMessagesAndSymbols
 from fieldhunter.utils.base import Flows
-from fieldhunter.utils.eval import FieldTypeReport
-
-
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-
+from fieldhunter.utils.eval import FieldTypeReport, GroundTruth
 
 if __name__ == '__main__':
     parser = ArgumentParser(
         description='Re-Implementation of FieldHunter.')
     parser.add_argument('pcapfilename', help='Filename of the PCAP to load.')
-    parser.add_argument('-i', '--interactive', help='open ipython prompt after finishing the analysis.',
+    parser.add_argument('-i', '--interactive', help='Open ipython prompt after finishing the analysis.',
                         action="store_true")
+    parser.add_argument('-d', '--debug', help='Enable debug output.', action="store_true")
     args = parser.parse_args()
+    if args.debug:
+        print("DEBUG")
+        logging.basicConfig(level=logging.DEBUG)
+        logger = logging.getLogger()
+        logger.setLevel(logging.DEBUG)
+    else:
+        print("INFO")
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
     layer = 2
     relativeToIP = True
 
@@ -114,6 +121,20 @@ if __name__ == '__main__':
         infieldReport = FieldTypeReport(infields, comparator, segmentedMessages)
         infieldReport.addXLworksheet(infieldWorkbook, FieldTypeReport.ovTitle)
     FieldTypeReport.saveWorkbook(infieldWorkbook, filechecker.pcapstrippedname)
+
+    # coverage
+    tpByteSum = sum(sum(
+            len(seg) for seg in msg
+            if isinstance(seg, TypedSegment) and comparator.lookupField(seg)[1] in GroundTruth.fieldtypes[seg.fieldtype]
+        ) for msg in segmentedMessages.values())
+    payloadSum = sum(len(msg.data) for msg in segmentedMessages.keys())
+    coverage = tpByteSum/payloadSum
+    print(f"Coverage (ratio of TP bytes): {coverage:.5f}")
+    # TODO quick and dirty hard coded filename, no checks.
+    import csv
+    with open("reports/fh-coverage.csv", "a") as covcsv:
+        covwriter = csv.writer(covcsv)
+        covwriter.writerow([filechecker.pcapstrippedname, tpByteSum, payloadSum, coverage])
 
     # interactive
     if args.interactive:

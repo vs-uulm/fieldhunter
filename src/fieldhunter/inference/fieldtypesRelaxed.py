@@ -18,7 +18,7 @@ from fieldhunter.inference.fieldtypes import NonConstantNonRandomEntropyFieldTyp
 import fieldhunter.inference.fieldtypes as fieldtypes
 
 
-logging.getLogger(__name__).setLevel(logging.DEBUG)
+# logging.getLogger(__name__).setLevel(logging.DEBUG)
 
 
 class MSGtype(fieldtypes.MSGtype):
