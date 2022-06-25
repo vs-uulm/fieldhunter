@@ -83,7 +83,7 @@ if __name__ == '__main__':
 
     inferenceDuration = time() - inferenceStart
     # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
+    # statistics for all types
     print(tabulate(
         [(infield.typelabel,
             sum(1 for msgsegs in infield.segments if len(msgsegs) > 0),
@@ -105,7 +105,7 @@ if __name__ == '__main__':
     print("Calculate FMS...")
     message2quality = DissectorMatcher.symbolListFMS(comparator, symbols)
     # write statistics to csv
-    writeReport(message2quality, inferenceDuration, specimens, comparator, "fieldhunter-literal",
+    writeReport(message2quality, inferenceDuration, comparator, "fieldhunter-literal",
                 filechecker.reportFullPath)
 
     # FTR validation: calculate TP/FP/FN ==> P/R per protocol and per type

@@ -1,6 +1,6 @@
 # FieldHunter
 
-Re-implementation of the protocol reverse engineering approach FieldHunter as proposed in 
+Re-implementation of parts of the protocol reverse engineering approach FieldHunter (FH) as proposed in 
 
 > Bermudez, Ignacio, Alok Tongaonkar, Marios Iliofotou, Marco Mellia, und Maurizio M. Munafò. 
 > „Towards Automatic Protocol Field Inference“. Computer Communications 84 (15. Juni 2016). 
@@ -16,6 +16,9 @@ for evaluation to be run by
 
 The original FieldHunter heuristics are run via
 `eval-fh.sh`.
+
+It only implements FH's binary message handling using n-grams (not textual using delimiters!)
+
 
 Statistics about traces can be gained by
 `eval-traces.sh`.

@@ -6,6 +6,7 @@
 #input=input/maxdiff-filtered/*-1000.pcap
 #input=input/maxdiff-fromOrig/*-100.pcap
 input="input/maxdiff-fromOrig/*-100*.pcap input/deduped-orig/*-100*.pcap"
+#input="input/maxdiff-fromOrig/ntp_SMIA-20111010_maxdiff-100.pcap"
 
 
 #tftnext=$(expr 1 + $(ls -d reports/tft-* | sed "s/^.*tft-\([0-9]*\)-.*$/\1/" | sort | tail -1))
