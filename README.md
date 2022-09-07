@@ -25,3 +25,10 @@ Statistics about traces can be gained by
 
 Not sure about a licence right now.
 
+## Installation
+
+Clone the repository including the nemere submodule:
+```git clone --recurse-submodules git@github.com:vs-uulm/nemesys.git```
+
+
+
